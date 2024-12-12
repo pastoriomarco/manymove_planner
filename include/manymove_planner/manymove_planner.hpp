@@ -1,28 +1,22 @@
-// manymove_planner.hpp
-
 #pragma once
 
 #include <rclcpp/rclcpp.hpp>
 #include <memory>
 #include <string>
 #include <vector>
-#include <utility> // For std::pair
+#include <utility>
 
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
-#include <moveit/planning_scene/planning_scene.h>
 #include <moveit_msgs/msg/collision_object.hpp>
 #include <moveit_msgs/srv/get_planning_scene.hpp>
 #include <geometry_msgs/msg/pose_stamped.hpp>
 #include <moveit_msgs/msg/robot_trajectory.hpp>
-
-// Trajectory processing includes
 #include <moveit/trajectory_processing/time_optimal_trajectory_generation.h>
 #include <moveit/trajectory_processing/iterative_spline_parameterization.h>
 #include <moveit/trajectory_processing/ruckig_traj_smoothing.h>
 #include <moveit/robot_trajectory/robot_trajectory.h>
 
-// Action message include
 #include "manymove_planner/action/move_manipulator.hpp"
 #include "manymove_planner/msg/movement_config.hpp"
 
@@ -35,10 +29,12 @@ public:
         const std::string &base_frame,
         const std::string &tcp_frame);
 
+    // Check if at targets
     bool isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose, double tolerance = 1e-2) const;
     bool isAtJointTarget(const std::vector<double> &joint_values, double tolerance = 1e-2) const;
     bool isAtNamedTarget(const std::string &target_name, double tolerance = 1e-2) const;
 
+    // Single movement commands
     bool moveToPoseTarget(const geometry_msgs::msg::Pose &target_pose, const manymove_planner::msg::MovementConfig &config);
     bool moveToJointTarget(const std::vector<double> &joint_values, const manymove_planner::msg::MovementConfig &config);
     bool moveToNamedTarget(const std::string &target_name, const manymove_planner::msg::MovementConfig &config);
@@ -46,35 +42,26 @@ public:
 
     bool findCollisionObject(const std::string &partial_id, moveit_msgs::msg::CollisionObject &found_object);
 
-    /**
-     * @brief Plans a trajectory based on the MoveManipulator action goal.
-     *
-     * This function centralizes the planning logic for different movement types.
-     * It does not perform time parameterization or execution.
-     *
-     * @param goal The MoveManipulator action goal containing movement details.
-     * @return A pair where the first element is a boolean indicating success,
-     *         and the second element is the planned RobotTrajectory.
-     */
+    // Plan a single move
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> plan(const manymove_planner::action::MoveManipulator::Goal &goal);
 
-    /**
-     * @brief Plans a sequence of trajectories based on a vector of MoveManipulator action goals.
-     *
-     * This function plans each goal in sequence, using the last position of the previous trajectory as the start state for the next.
-     * It collects all planned trajectories and their corresponding configurations.
-     *
-     * @param goals A vector of MoveManipulator::Goal, each containing movement type, config, and target.
-     * @return A pair where the first element is a vector of RobotTrajectories,
-     *         and the second element is a vector of their corresponding MovementConfigs.
-     */
-    std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(const std::vector<manymove_planner::action::MoveManipulator::Goal> &goals);
+    // Plan a sequence of moves
+    std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
+        const std::vector<manymove_planner::action::MoveManipulator::Goal> &goals);
+
+    // Apply time parametrization and combine into one smoothed trajectory
+    std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
+        const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,
+        const std::vector<manymove_planner::msg::MovementConfig> &configs,
+        std::vector<size_t> &sizes);
 
 private:
     bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
     bool executeTrajectory(const robot_trajectory::RobotTrajectoryPtr &trajectory);
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
     double computeMaxCartesianSpeed(const robot_trajectory::RobotTrajectoryPtr &trajectory) const;
+
+    geometry_msgs::msg::Pose computeEndPoseFromJoints(const std::vector<double> &joint_values) const;
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Logger logger_;
