@@ -120,9 +120,9 @@ install(TARGETS client_example_node
 
 
 #########################
-# Install config & launch
+# Install launch & config
 #########################
-install(DIRECTORY config launch
+install(DIRECTORY launch #config
   DESTINATION share/${PROJECT_NAME}
 )
 
