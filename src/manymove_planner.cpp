@@ -11,8 +11,9 @@ ManyMovePlanner::ManyMovePlanner(
     const rclcpp::Node::SharedPtr &node,
     const std::string &planning_group,
     const std::string &base_frame,
-    const std::string &tcp_frame)
-    : node_(node), logger_(node->get_logger()), base_frame_(base_frame), tcp_frame_(tcp_frame)
+    const std::string &tcp_frame,
+    const std::string &traj_controller)
+    : node_(node), logger_(node->get_logger()), base_frame_(base_frame), tcp_frame_(tcp_frame), traj_controller_(traj_controller)
 {
     // Initialize MoveGroupInterface with the shared node
     move_group_interface_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(node_, planning_group);
@@ -21,7 +22,7 @@ ManyMovePlanner::ManyMovePlanner(
     RCLCPP_INFO(logger_, "ManyMovePlanner initialized with group: %s", planning_group.c_str());
 
     // Initialize FollowJointTrajectory action client
-    follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/lite6_traj_controller/follow_joint_trajectory");
+    follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/" + traj_controller_ + "/follow_joint_trajectory");
     if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(10)))
     {
         RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available after waiting");

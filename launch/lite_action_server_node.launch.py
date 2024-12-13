@@ -1,5 +1,4 @@
 import os
-import yaml
 from launch.actions import OpaqueFunction, DeclareLaunchArgument
 from ament_index_python import get_package_share_directory
 from launch import LaunchDescription
@@ -9,6 +8,7 @@ from uf_ros_lib.moveit_configs_builder import MoveItConfigsBuilder
 from uf_ros_lib.uf_robot_utils import generate_ros2_control_params_temp_file
 
 def launch_setup(context, *args, **kwargs):
+    # Existing LaunchConfigurations
     dof = LaunchConfiguration('dof', default=6)
     robot_type = LaunchConfiguration('robot_type', default='lite')
     prefix = LaunchConfiguration('prefix', default='')
@@ -45,7 +45,6 @@ def launch_setup(context, *args, **kwargs):
     no_gui_ctrl = LaunchConfiguration('no_gui_ctrl', default=False)
     ros_namespace = LaunchConfiguration('ros_namespace', default='').perform(context)
 
-    # Retrieve your custom parameters
     velocity_scaling_factor = LaunchConfiguration('velocity_scaling_factor')
     acceleration_scaling_factor = LaunchConfiguration('acceleration_scaling_factor')
     max_exec_retries = LaunchConfiguration('max_exec_retries')
@@ -55,6 +54,11 @@ def launch_setup(context, *args, **kwargs):
     max_cartesian_speed = LaunchConfiguration('max_cartesian_speed')
     plan_number_target = LaunchConfiguration('plan_number_target')
     plan_number_limit = LaunchConfiguration('plan_number_limit')
+
+    planning_group = LaunchConfiguration('planning_group')
+    base_frame = LaunchConfiguration('base_frame')
+    tcp_frame = LaunchConfiguration('tcp_frame')
+    traj_controller = LaunchConfiguration('traj_controller')
 
     ros2_control_plugin = 'uf_robot_hardware/UFRobotFakeSystemHardware'
     controllers_name = 'fake_controllers'
@@ -69,15 +73,7 @@ def launch_setup(context, *args, **kwargs):
         robot_type=robot_type.perform(context)
     )
 
-    # moveit_configs.robot_description
-    # moveit_configs.robot_description_semantic
-    # moveit_configs.robot_description_kinematics
-    # moveit_configs.planning_pipelines
-    # moveit_configs.trajectory_execution
-    # moveit_configs.planning_scene_monitor
-    # moveit_configs.joint_limits
-    # moveit_configs.to_dict()
-
+    # Initialize MoveIt Configurations
     moveit_configs = MoveItConfigsBuilder(
         context=context,
         controllers_name=controllers_name,
@@ -116,9 +112,11 @@ def launch_setup(context, *args, **kwargs):
         geometry_mesh_tcp_rpy=geometry_mesh_tcp_rpy,
     ).to_moveit_configs()
 
+    # Define the action_server_node with new parameters
     action_server_node = Node(
         package='manymove_planner',
         executable='action_server_node',
+        name='manymove_planner',  # Optional: name the node
         output='screen',
         parameters=[
             moveit_configs.to_dict(),
@@ -132,6 +130,12 @@ def launch_setup(context, *args, **kwargs):
                 'max_cartesian_speed': max_cartesian_speed,
                 'plan_number_target': plan_number_target,
                 'plan_number_limit': plan_number_limit,
+                # Adding the new parameters here
+                'planning_group': planning_group,
+                'base_frame': base_frame,
+                'tcp_frame': tcp_frame,
+                'traj_controller': traj_controller,
+
             }
         ],
     )
@@ -142,6 +146,7 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
+        # Existing DeclareLaunchArguments
         DeclareLaunchArgument('velocity_scaling_factor', default_value='0.5', description='Velocity scaling factor'),
         DeclareLaunchArgument('acceleration_scaling_factor', default_value='0.5', description='Acceleration scaling factor'),
         DeclareLaunchArgument('max_exec_retries', default_value='5', description='Maximum number of retries'),
@@ -151,5 +156,13 @@ def generate_launch_description():
         DeclareLaunchArgument('max_cartesian_speed', default_value='0.5', description='Max cartesian speed'),
         DeclareLaunchArgument('plan_number_target', default_value='12', description='Plan number target'),
         DeclareLaunchArgument('plan_number_limit', default_value='32', description='Plan number limit'),
+        
+        # New DeclareLaunchArguments for planning_group, base_frame, tcp_frame
+        DeclareLaunchArgument('planning_group', default_value='lite6', description='MoveIt planning group'),
+        DeclareLaunchArgument('base_frame', default_value='link_base', description='Base frame of the robot'),
+        DeclareLaunchArgument('tcp_frame', default_value='link_tcp', description='TCP (end effector) frame of the robot' ),
+        DeclareLaunchArgument('traj_controller', default_value='lite6_traj_controller', description='traj_controller action server name of the robot' ),
+
+        # OpaqueFunction to set up the node
         OpaqueFunction(function=launch_setup)
     ])

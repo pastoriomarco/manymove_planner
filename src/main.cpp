@@ -18,12 +18,14 @@ int main(int argc, char **argv)
                         { executor.spin(); });
 
     // Get parameters
-    std::string robot_type;
-    node->get_parameter_or<std::string>("robot_type", robot_type, "lite6");
+    std::string planning_group;
+    node->get_parameter_or<std::string>("planning_group", planning_group, "lite6");
     std::string base_frame;
     node->get_parameter_or<std::string>("base_link", base_frame, "link_base");
     std::string tcp_frame;
     node->get_parameter_or<std::string>("tcp_frame", tcp_frame, "link_tcp");
+    std::string traj_controller;
+    node->get_parameter_or<std::string>("traj_controller", traj_controller, "lite6_traj_controller");
 
     manymove_planner::msg::MovementConfig  max_move_config;
     node->get_parameter_or<double>("velocity_scaling_factor", max_move_config.velocity_scaling_factor, 0.5);
@@ -46,7 +48,7 @@ int main(int argc, char **argv)
     slow_move_config.acceleration_scaling_factor = max_move_config.acceleration_scaling_factor / 4.0;
     slow_move_config.max_cartesian_speed = 0.05;
 
-    ManyMovePlanner planner(node, robot_type, base_frame, tcp_frame);
+    ManyMovePlanner planner(node, planning_group, base_frame, tcp_frame, traj_controller);
 
     rclcpp::sleep_for(std::chrono::seconds(1));
 

@@ -40,7 +40,8 @@ public:
         const rclcpp::Node::SharedPtr &node,
         const std::string &planning_group,
         const std::string &base_frame,
-        const std::string &tcp_frame);
+        const std::string &tcp_frame,
+        const std::string &traj_controller);
 
     // Check if at targets
     bool isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose, double tolerance = 1e-2) const;
@@ -89,6 +90,7 @@ private:
     rclcpp::Logger logger_;
     std::string base_frame_;
     std::string tcp_frame_;
+    std::string traj_controller_;
 
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_interface_;
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface_;

@@ -10,11 +10,16 @@ int main(int argc, char** argv)
 
     auto node = rclcpp::Node::make_shared("action_server_node", "", node_options);
 
-    std::string robot_type = "lite6";
-    std::string base_frame = "link_base";
-    std::string tcp_frame = "link_tcp";
+    std::string planning_group;
+    node->get_parameter_or<std::string>("planning_group", planning_group, "lite6");
+    std::string base_frame;
+    node->get_parameter_or<std::string>("base_link", base_frame, "link_base");
+    std::string tcp_frame;
+    node->get_parameter_or<std::string>("tcp_frame", tcp_frame, "link_tcp");
+    std::string traj_controller;
+    node->get_parameter_or<std::string>("traj_controller", traj_controller, "lite6_traj_controller");
 
-    auto planner = std::make_shared<ManyMovePlanner>(node, robot_type, base_frame, tcp_frame);
+    auto planner = std::make_shared<ManyMovePlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
     auto server = std::make_shared<MoveManipulatorActionServer>(node, planner);
 
     rclcpp::executors::SingleThreadedExecutor executor;
