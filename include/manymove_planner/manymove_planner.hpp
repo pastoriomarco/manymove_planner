@@ -5,6 +5,7 @@
 #include <string>
 #include <vector>
 #include <utility>
+#include <future>
 
 #include <moveit/move_group_interface/move_group_interface.h>
 #include <moveit/planning_scene_interface/planning_scene_interface.h>
@@ -18,11 +19,23 @@
 #include <moveit/robot_trajectory/robot_trajectory.h>
 
 #include "manymove_planner/action/move_manipulator.hpp"
+#include "manymove_planner/action/move_manipulator_sequence.hpp"
 #include "manymove_planner/msg/movement_config.hpp"
+#include "manymove_planner/msg/move_manipulator_goal.hpp"
+
+#include <control_msgs/action/follow_joint_trajectory.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 
 class ManyMovePlanner
 {
 public:
+    using MoveManipulator = manymove_planner::action::MoveManipulator;
+    using MoveManipulatorSequence = manymove_planner::action::MoveManipulatorSequence;
+    using FollowJointTrajectory = control_msgs::action::FollowJointTrajectory;
+    using GoalHandleFollowJointTrajectory = rclcpp_action::ClientGoalHandle<FollowJointTrajectory>;
+    using GoalHandleMoveManipulator = rclcpp_action::ServerGoalHandle<MoveManipulator>;
+    using GoalHandleMoveManipulatorSequence = rclcpp_action::ServerGoalHandle<MoveManipulatorSequence>;
+
     ManyMovePlanner(
         const rclcpp::Node::SharedPtr &node,
         const std::string &planning_group,
@@ -47,7 +60,7 @@ public:
 
     // Plan a sequence of moves
     std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
-        const std::vector<manymove_planner::action::MoveManipulator::Goal> &goals);
+        const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal);
 
     // Apply time parametrization and combine into one smoothed trajectory
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
@@ -55,9 +68,18 @@ public:
         const std::vector<manymove_planner::msg::MovementConfig> &configs,
         std::vector<size_t> &sizes);
 
+    // Execute the concatenated trajectory with feedback (for action server)
+    bool executeTrajectoryWithFeedback(
+        const moveit_msgs::msg::RobotTrajectory &trajectory,
+        const std::vector<size_t> &sizes,
+        const std::shared_ptr<GoalHandleMoveManipulatorSequence> &goal_handle);
+
+    // Execute the trajectory without feedback (for single movement commands)
+    bool executeTrajectory(
+        const moveit_msgs::msg::RobotTrajectory &trajectory);
+
 private:
     bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
-    bool executeTrajectory(const robot_trajectory::RobotTrajectoryPtr &trajectory);
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
     double computeMaxCartesianSpeed(const robot_trajectory::RobotTrajectoryPtr &trajectory) const;
 
@@ -70,4 +92,7 @@ private:
 
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_interface_;
     moveit::planning_interface::PlanningSceneInterface planning_scene_interface_;
+
+    // Action client for FollowJointTrajectory
+    rclcpp_action::Client<FollowJointTrajectory>::SharedPtr follow_joint_traj_client_;
 };

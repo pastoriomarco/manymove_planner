@@ -19,7 +19,6 @@ int main(int argc, char** argv)
 
     rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(node);
-    // No second node needed, 'server' uses the same node
     executor.spin();
 
     rclcpp::shutdown();

@@ -1,10 +1,9 @@
-// manymove_planner.cpp
-
 #include "manymove_planner/manymove_planner.hpp"
 #include <algorithm>
 #include <cmath>
 #include <future>
 #include <map>
+#include <tf2/LinearMath/Quaternion.h>
 
 #include <moveit/robot_model/robot_model.h>
 
@@ -20,6 +19,17 @@ ManyMovePlanner::ManyMovePlanner(
     move_group_interface_->setPlanningTime(5.0);
 
     RCLCPP_INFO(logger_, "ManyMovePlanner initialized with group: %s", planning_group.c_str());
+
+    // Initialize FollowJointTrajectory action client
+    follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/lite6_traj_controller/follow_joint_trajectory");
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(10)))
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available after waiting");
+    }
+    else
+    {
+        RCLCPP_INFO(logger_, "FollowJointTrajectory action server available");
+    }
 }
 
 double ManyMovePlanner::computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const
@@ -97,14 +107,14 @@ bool ManyMovePlanner::applyTimeParameterization(robot_trajectory::RobotTrajector
             return false;
         }
 
-        double max_cartesian_speed = computeMaxCartesianSpeed(trajectory);
-        if (max_cartesian_speed <= config.max_cartesian_speed)
+        double max_speed = computeMaxCartesianSpeed(trajectory);
+        if (max_speed <= config.max_cartesian_speed)
         {
             return true; // success
         }
         else
         {
-            double scale = config.max_cartesian_speed / max_cartesian_speed;
+            double scale = config.max_cartesian_speed / max_speed;
             velocity_scaling_factor *= scale;
             // Adjust acceleration similarly (heuristic)
             acceleration_scaling_factor = (acceleration_scaling_factor * scale + acceleration_scaling_factor) / 2.0;
@@ -123,18 +133,15 @@ bool ManyMovePlanner::applyTimeParameterization(robot_trajectory::RobotTrajector
 
 std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const manymove_planner::action::MoveManipulator::Goal &goal)
 {
-    // Initialize variables
     std::vector<std::pair<moveit_msgs::msg::RobotTrajectory, double>> trajectories;
 
-    // Configure the move_group_interface_ based on movement_type
     // Handle start state
-    if (!goal.start_joint_values.empty())
+    if (!goal.goal.start_joint_values.empty())
     {
         moveit::core::RobotState start_state(*move_group_interface_->getCurrentState());
         const moveit::core::JointModelGroup *joint_model_group = start_state.getJointModelGroup(move_group_interface_->getName());
 
-        // Set joint group positions; no return value to capture
-        start_state.setJointGroupPositions(joint_model_group, goal.start_joint_values);
+        start_state.setJointGroupPositions(joint_model_group, goal.goal.start_joint_values);
         move_group_interface_->setStartState(start_state);
     }
     else
@@ -143,28 +150,28 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
     }
 
     // Set scaling factors
-    move_group_interface_->setMaxVelocityScalingFactor(goal.config.velocity_scaling_factor);
-    move_group_interface_->setMaxAccelerationScalingFactor(goal.config.acceleration_scaling_factor);
+    move_group_interface_->setMaxVelocityScalingFactor(goal.goal.config.velocity_scaling_factor);
+    move_group_interface_->setMaxAccelerationScalingFactor(goal.goal.config.acceleration_scaling_factor);
 
     // Set movement targets
-    if ((goal.movement_type == "pose") || (goal.movement_type == "joint") || (goal.movement_type == "named"))
+    if ((goal.goal.movement_type == "pose") || (goal.goal.movement_type == "joint") || (goal.goal.movement_type == "named"))
     {
-        if (goal.movement_type == "pose")
+        if (goal.goal.movement_type == "pose")
         {
-            move_group_interface_->setPoseTarget(goal.pose_target, tcp_frame_);
+            move_group_interface_->setPoseTarget(goal.goal.pose_target, tcp_frame_);
         }
-        else if (goal.movement_type == "joint")
+        else if (goal.goal.movement_type == "joint")
         {
-            move_group_interface_->setJointValueTarget(goal.joint_values);
+            move_group_interface_->setJointValueTarget(goal.goal.joint_values);
         }
-        else if (goal.movement_type == "named")
+        else if (goal.goal.movement_type == "named")
         {
-            move_group_interface_->setNamedTarget(goal.named_target);
+            move_group_interface_->setNamedTarget(goal.goal.named_target);
         }
 
         // Plan multiple trajectories
         int attempts = 0;
-        while (attempts < goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.config.plan_number_target)
+        while (attempts < goal.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.goal.config.plan_number_target)
         {
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             if (move_group_interface_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS)
@@ -174,27 +181,24 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
             }
             else
             {
-                RCLCPP_WARN_STREAM(logger_, goal.movement_type << " target planning attempt " << (attempts + 1) << " failed.");
+                RCLCPP_WARN(logger_, "%s target planning attempt %d failed.",
+                            goal.goal.movement_type.c_str(), attempts + 1);
             }
             attempts++;
         }
     }
-    else if (goal.movement_type == "cartesian")
+    else if (goal.goal.movement_type == "cartesian")
     {
-        // For cartesian movement, use pose_target as the single waypoint
+        // Cartesian movement
         std::vector<geometry_msgs::msg::Pose> waypoints;
-        waypoints.push_back(goal.pose_target);
+        waypoints.push_back(goal.goal.pose_target);
 
-        // Plan multiple trajectories
         int attempts = 0;
-        while (attempts < goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.config.plan_number_target)
+        while (attempts < goal.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.goal.config.plan_number_target)
         {
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             double fraction = move_group_interface_->computeCartesianPath(
-                waypoints,
-                goal.config.step_size,      // eef_step
-                goal.config.jump_threshold, // jump_threshold
-                plan.trajectory_);
+                waypoints, goal.goal.config.step_size, goal.goal.config.jump_threshold, plan.trajectory_);
 
             if (fraction >= 1.0)
             {
@@ -210,40 +214,272 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
     }
     else
     {
-        RCLCPP_ERROR(logger_, "Unknown movement_type: %s", goal.movement_type.c_str());
-        return std::make_pair(false, moveit_msgs::msg::RobotTrajectory());
+        RCLCPP_ERROR(logger_, "Unknown movement_type: %s", goal.goal.movement_type.c_str());
+        return {false, moveit_msgs::msg::RobotTrajectory()};
     }
 
-    // Check if any trajectory was found
     if (trajectories.empty())
     {
-        RCLCPP_ERROR(logger_, "No valid trajectory found for movement_type: %s", goal.movement_type.c_str());
-        return std::make_pair(false, moveit_msgs::msg::RobotTrajectory());
+        RCLCPP_ERROR(logger_, "No valid trajectory found for movement_type: %s", goal.goal.movement_type.c_str());
+        return {false, moveit_msgs::msg::RobotTrajectory()};
     }
 
     // Select the shortest trajectory
     auto shortest = std::min_element(trajectories.begin(), trajectories.end(),
-                                     [](const std::pair<moveit_msgs::msg::RobotTrajectory, double> &a,
-                                        const std::pair<moveit_msgs::msg::RobotTrajectory, double> &b) -> bool
-                                     {
-                                         return a.second < b.second;
-                                     });
+                                     [](const auto &a, const auto &b)
+                                     { return a.second < b.second; });
 
-    // Return the trajectory and success flag
-    return std::make_pair(true, shortest->first);
+    return {true, shortest->first};
 }
 
-bool ManyMovePlanner::executeTrajectory(const robot_trajectory::RobotTrajectoryPtr &trajectory)
+bool ManyMovePlanner::executeTrajectoryWithFeedback(
+    const moveit_msgs::msg::RobotTrajectory &trajectory,
+    const std::vector<size_t> &sizes,
+    const std::shared_ptr<GoalHandleMoveManipulatorSequence> &goal_handle)
 {
-    moveit::planning_interface::MoveGroupInterface::Plan plan;
-    trajectory->getRobotTrajectoryMsg(plan.trajectory_);
-
-    bool success = (move_group_interface_->execute(plan) == moveit::core::MoveItErrorCode::SUCCESS);
-    if (!success)
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(5)))
     {
-        RCLCPP_ERROR(logger_, "Trajectory execution failed.");
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available");
+        return false;
     }
-    return success;
+
+    FollowJointTrajectory::Goal follow_goal;
+    follow_goal.trajectory = trajectory.joint_trajectory;
+
+    auto result_promise = std::make_shared<std::promise<bool>>();
+    std::future<bool> result_future = result_promise->get_future();
+    const auto &points = follow_goal.trajectory.points;
+
+    auto send_goal_options = rclcpp_action::Client<FollowJointTrajectory>::SendGoalOptions();
+
+    // Helper function to compute Euclidean distance in joint space
+    auto computeDistance = [](const std::vector<double> &a, const std::vector<double> &b) -> double
+    {
+        if (a.size() != b.size())
+            return std::numeric_limits<double>::max();
+
+        double distance = 0.0;
+        for (size_t i = 0; i < a.size(); ++i)
+        {
+            double diff = a[i] - b[i];
+            distance += diff * diff;
+        }
+        return std::sqrt(distance);
+    };
+
+    // Helper function to find the closest waypoint index based on actual positions
+    auto findClosestWaypoint = [&](const std::vector<trajectory_msgs::msg::JointTrajectoryPoint> &waypoints,
+                                   const std::vector<double> &actual_positions) -> size_t
+    {
+        size_t closest_idx = 0;
+        double min_distance = std::numeric_limits<double>::max();
+
+        for (size_t i = 0; i < waypoints.size(); ++i)
+        {
+            double distance = computeDistance(actual_positions, waypoints[i].positions);
+            if (distance < min_distance)
+            {
+                min_distance = distance;
+                closest_idx = i;
+            }
+        }
+
+        return closest_idx;
+    };
+
+    // Updated feedback callback
+    send_goal_options.feedback_callback =
+        [this, sizes, goal_handle, points, computeDistance, findClosestWaypoint](auto, const auto &feedback)
+    {
+        if (!goal_handle)
+            return;
+
+        // Extract actual positions from feedback
+        std::vector<double> actual_positions = feedback->actual.positions;
+
+        // // Debugging: Print actual positions
+        // std::stringstream pos_stream;
+        // pos_stream << "Actual Positions: ";
+        // for (const auto &pos : actual_positions)
+        //     pos_stream << pos << " ";
+        // RCLCPP_INFO(logger_, "%s", pos_stream.str().c_str());
+
+        // Find the closest waypoint index
+        size_t closest_idx = findClosestWaypoint(points, actual_positions);
+
+        // // Debugging: Print closest waypoint index
+        // RCLCPP_INFO(logger_, "Closest Waypoint Index: %zu", closest_idx);
+
+        // Determine current segment based on sizes
+        size_t segment_index = 0;
+        size_t cumulative = 0;
+        for (size_t s = 0; s < sizes.size(); ++s)
+        {
+            if (closest_idx < cumulative + sizes[s])
+            {
+                segment_index = s;
+                break;
+            }
+            cumulative += sizes[s];
+        }
+
+        // Calculate progress as the ratio of closest_idx to total waypoints
+        double total_waypoints = static_cast<double>(points.size());
+        double progress = static_cast<double>(closest_idx) / total_waypoints;
+
+        // Clamp progress to [0.0, 1.0]
+        progress = std::min(std::max(progress, 0.0), 1.0);
+
+        // Publish or log progress
+        auto feedback_msg = std::make_shared<MoveManipulatorSequence::Feedback>();
+        feedback_msg->progress = static_cast<float>(progress);
+        goal_handle->publish_feedback(feedback_msg);
+
+        RCLCPP_INFO(logger_, "Sequence execution progress: %.6f (segment %zu of %zu)",
+                    progress, segment_index + 1, sizes.size());
+    };
+
+    send_goal_options.result_callback =
+        [this, result_promise, goal_handle](const auto &result)
+    {
+        bool success = false;
+        switch (result.code)
+        {
+        case rclcpp_action::ResultCode::SUCCEEDED:
+            RCLCPP_INFO(logger_, "FollowJointTrajectory succeeded");
+            success = true;
+            break;
+        case rclcpp_action::ResultCode::ABORTED:
+            RCLCPP_ERROR(logger_, "FollowJointTrajectory aborted");
+            success = false;
+            break;
+        case rclcpp_action::ResultCode::CANCELED:
+            RCLCPP_WARN(logger_, "FollowJointTrajectory canceled");
+            success = false;
+            break;
+        default:
+            RCLCPP_ERROR(logger_, "Unknown result code from FollowJointTrajectory");
+            success = false;
+            break;
+        }
+        result_promise->set_value(success);
+    };
+
+    auto goal_handle_future = follow_joint_traj_client_->async_send_goal(follow_goal, send_goal_options);
+
+    // Wait for the goal handle to be ready without spinning again
+    if (goal_handle_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Failed to send goal to FollowJointTrajectory action server within the timeout");
+        return false;
+    }
+
+    auto goal_handle_result = goal_handle_future.get();
+    if (!goal_handle_result)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server rejected the goal");
+        return false;
+    }
+
+    // Wait for the result via the promise set in the result callback
+    if (result_future.wait_for(std::chrono::seconds(120)) == std::future_status::timeout)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action did not complete within the timeout");
+        return false;
+    }
+
+    bool exec_success = result_future.get();
+    if (exec_success)
+    {
+        RCLCPP_INFO(logger_, "Trajectory execution succeeded for sequence");
+        return true;
+    }
+    else
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution failed for sequence");
+        return false;
+    }
+}
+
+bool ManyMovePlanner::executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory)
+{
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(5)))
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available");
+        return false;
+    }
+
+    control_msgs::action::FollowJointTrajectory::Goal follow_goal;
+    follow_goal.trajectory = trajectory.joint_trajectory;
+
+    auto result_promise = std::make_shared<std::promise<bool>>();
+    std::future<bool> result_future = result_promise->get_future();
+
+    auto send_goal_options = rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SendGoalOptions();
+
+    // No feedback needed here
+    send_goal_options.feedback_callback = [](auto, const auto &) {};
+
+    send_goal_options.result_callback =
+        [this, result_promise](const auto &result)
+    {
+        bool success = false;
+        switch (result.code)
+        {
+        case rclcpp_action::ResultCode::SUCCEEDED:
+            RCLCPP_INFO(logger_, "FollowJointTrajectory succeeded");
+            success = true;
+            break;
+        case rclcpp_action::ResultCode::ABORTED:
+            RCLCPP_ERROR(logger_, "FollowJointTrajectory aborted");
+            success = false;
+            break;
+        case rclcpp_action::ResultCode::CANCELED:
+            RCLCPP_WARN(logger_, "FollowJointTrajectory canceled");
+            success = false;
+            break;
+        default:
+            RCLCPP_ERROR(logger_, "Unknown result code from FollowJointTrajectory");
+            success = false;
+            break;
+        }
+        result_promise->set_value(success);
+    };
+
+    auto goal_handle_future = follow_joint_traj_client_->async_send_goal(follow_goal, send_goal_options);
+
+    // Wait for the goal handle to be ready
+    if (goal_handle_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Failed to send goal to FollowJointTrajectory action server within the timeout");
+        return false;
+    }
+
+    auto goal_handle_result = goal_handle_future.get();
+    if (!goal_handle_result)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server rejected the goal");
+        return false;
+    }
+
+    // Wait for the result future
+    if (result_future.wait_for(std::chrono::seconds(120)) == std::future_status::timeout)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action did not complete within the timeout");
+        return false;
+    }
+
+    bool exec_success = result_future.get();
+    if (exec_success)
+    {
+        RCLCPP_INFO(logger_, "Trajectory execution succeeded");
+        return true;
+    }
+    else
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution failed");
+        return false;
+    }
 }
 
 bool ManyMovePlanner::isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose, double tolerance) const
@@ -255,7 +491,6 @@ bool ManyMovePlanner::isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose
         std::pow(current_pose.position.y - target_pose.position.y, 2) +
         std::pow(current_pose.position.z - target_pose.position.z, 2));
 
-    // For orientation, compute the quaternion distance
     double orientation_diff = std::abs(current_pose.orientation.x - target_pose.orientation.x) +
                               std::abs(current_pose.orientation.y - target_pose.orientation.y) +
                               std::abs(current_pose.orientation.z - target_pose.orientation.z) +
@@ -267,7 +502,6 @@ bool ManyMovePlanner::isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose
 bool ManyMovePlanner::isAtJointTarget(const std::vector<double> &joint_values, double tolerance) const
 {
     const std::vector<double> &current_joint_values = move_group_interface_->getCurrentJointValues();
-
     if (current_joint_values.size() != joint_values.size())
         return false;
 
@@ -282,7 +516,6 @@ bool ManyMovePlanner::isAtJointTarget(const std::vector<double> &joint_values, d
 
 bool ManyMovePlanner::isAtNamedTarget(const std::string &target_name, double tolerance) const
 {
-    // Retrieve the joint values for the named target
     std::map<std::string, double> target_joint_values_map;
     try
     {
@@ -290,11 +523,10 @@ bool ManyMovePlanner::isAtNamedTarget(const std::string &target_name, double tol
     }
     catch (const std::exception &e)
     {
-        RCLCPP_ERROR(logger_, "Exception while retrieving named target '%s': %s", target_name.c_str(), e.what());
+        RCLCPP_ERROR(logger_, "Exception retrieving named target '%s': %s", target_name.c_str(), e.what());
         return false;
     }
 
-    // Convert the map to a vector of joint values in the correct order
     const std::vector<std::string> &joint_names = move_group_interface_->getJoints();
     std::vector<double> target_joint_values;
     target_joint_values.reserve(joint_names.size());
@@ -313,16 +545,13 @@ bool ManyMovePlanner::isAtNamedTarget(const std::string &target_name, double tol
         }
     }
 
-    // Get current joint values
     std::vector<double> current_joint_values = move_group_interface_->getCurrentJointValues();
-
     if (current_joint_values.size() != target_joint_values.size())
     {
-        RCLCPP_ERROR(logger_, "Current joint values size does not match target joint values size.");
+        RCLCPP_ERROR(logger_, "Current joint values size doesn't match target joint values size.");
         return false;
     }
 
-    // Compare joint values within the specified tolerance
     for (size_t i = 0; i < current_joint_values.size(); ++i)
     {
         if (std::abs(current_joint_values[i] - target_joint_values[i]) > tolerance)
@@ -334,44 +563,37 @@ bool ManyMovePlanner::isAtNamedTarget(const std::string &target_name, double tol
 
 bool ManyMovePlanner::moveToPoseTarget(const geometry_msgs::msg::Pose &target_pose, const manymove_planner::msg::MovementConfig &config)
 {
-    // Check if already at the target pose
     if (isAtPoseTarget(target_pose))
     {
-        RCLCPP_INFO(logger_, "Already at the Pose Target. No movement needed.");
+        RCLCPP_INFO(logger_, "Already at Pose Target. No movement needed.");
         return true;
     }
 
-    // Construct the Goal message
     manymove_planner::action::MoveManipulator::Goal goal;
-    goal.movement_type = "pose";
-    goal.pose_target = target_pose;
-    // No joint values or named target needed for pose movements
-    goal.start_joint_values = {}; // Empty to use current state
-    goal.config = config;
+    goal.goal.movement_type = "pose";
+    goal.goal.pose_target = target_pose;
+    goal.goal.start_joint_values = {};
+    goal.goal.config = config;
 
-    // Call the centralized plan() function
     auto [success, trajectory] = plan(goal);
-
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Pose Target.");
         return false;
     }
 
-    // Create RobotTrajectory for time parameterization
-    auto robot_traj = std::make_shared<robot_trajectory::RobotTrajectory>(
-        move_group_interface_->getRobotModel(), move_group_interface_->getName());
-    robot_traj->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), trajectory);
+    std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
+    std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {config};
+    std::vector<size_t> sizes;
+    auto [param_success, final_trajectory] = applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
 
-    // Apply time parameterization
-    if (!applyTimeParameterization(robot_traj, config))
+    if (!param_success)
     {
         RCLCPP_ERROR(logger_, "Time parameterization failed for Pose Target trajectory.");
         return false;
     }
 
-    // Execute the trajectory
-    if (!executeTrajectory(robot_traj))
+    if (!executeTrajectory(final_trajectory))
     {
         RCLCPP_ERROR(logger_, "Execution failed for Pose Target trajectory.");
         return false;
@@ -383,44 +605,37 @@ bool ManyMovePlanner::moveToPoseTarget(const geometry_msgs::msg::Pose &target_po
 
 bool ManyMovePlanner::moveToJointTarget(const std::vector<double> &joint_values, const manymove_planner::msg::MovementConfig &config)
 {
-    // Check if already at the target joint positions
     if (isAtJointTarget(joint_values))
     {
-        RCLCPP_INFO(logger_, "Already at the Joint Target. No movement needed.");
+        RCLCPP_INFO(logger_, "Already at Joint Target. No movement needed.");
         return true;
     }
 
-    // Construct the Goal message
     manymove_planner::action::MoveManipulator::Goal goal;
-    goal.movement_type = "joint";
-    goal.joint_values = joint_values;
-    // No pose target or named target needed for joint movements
-    goal.start_joint_values = {}; // Empty to use current state
-    goal.config = config;
+    goal.goal.movement_type = "joint";
+    goal.goal.joint_values = joint_values;
+    goal.goal.start_joint_values = {};
+    goal.goal.config = config;
 
-    // Call the centralized plan() function
     auto [success, trajectory] = plan(goal);
-
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Joint Target.");
         return false;
     }
 
-    // Create RobotTrajectory for time parameterization
-    auto robot_traj = std::make_shared<robot_trajectory::RobotTrajectory>(
-        move_group_interface_->getRobotModel(), move_group_interface_->getName());
-    robot_traj->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), trajectory);
+    std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
+    std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {config};
+    std::vector<size_t> sizes;
+    auto [param_success, final_trajectory] = applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
 
-    // Apply time parameterization
-    if (!applyTimeParameterization(robot_traj, config))
+    if (!param_success)
     {
         RCLCPP_ERROR(logger_, "Time parameterization failed for Joint Target trajectory.");
         return false;
     }
 
-    // Execute the trajectory
-    if (!executeTrajectory(robot_traj))
+    if (!executeTrajectory(final_trajectory))
     {
         RCLCPP_ERROR(logger_, "Execution failed for Joint Target trajectory.");
         return false;
@@ -432,44 +647,37 @@ bool ManyMovePlanner::moveToJointTarget(const std::vector<double> &joint_values,
 
 bool ManyMovePlanner::moveToNamedTarget(const std::string &target_name, const manymove_planner::msg::MovementConfig &config)
 {
-    // Check if already at the named target
     if (isAtNamedTarget(target_name))
     {
         RCLCPP_INFO(logger_, "Already at the Named Target '%s'. No movement needed.", target_name.c_str());
         return true;
     }
 
-    // Construct the Goal message
     manymove_planner::action::MoveManipulator::Goal goal;
-    goal.movement_type = "named";
-    goal.named_target = target_name;
-    // No pose target or joint values needed for named movements
-    goal.start_joint_values = {}; // Empty to use current state
-    goal.config = config;
+    goal.goal.movement_type = "named";
+    goal.goal.named_target = target_name;
+    goal.goal.start_joint_values = {};
+    goal.goal.config = config;
 
-    // Call the centralized plan() function
     auto [success, trajectory] = plan(goal);
-
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Named Target.");
         return false;
     }
 
-    // Create RobotTrajectory for time parameterization
-    auto robot_traj = std::make_shared<robot_trajectory::RobotTrajectory>(
-        move_group_interface_->getRobotModel(), move_group_interface_->getName());
-    robot_traj->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), trajectory);
+    std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
+    std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {config};
+    std::vector<size_t> sizes;
+    auto [param_success, final_trajectory] = applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
 
-    // Apply time parameterization
-    if (!applyTimeParameterization(robot_traj, config))
+    if (!param_success)
     {
         RCLCPP_ERROR(logger_, "Time parameterization failed for Named Target trajectory.");
         return false;
     }
 
-    // Execute the trajectory
-    if (!executeTrajectory(robot_traj))
+    if (!executeTrajectory(final_trajectory))
     {
         RCLCPP_ERROR(logger_, "Execution failed for Named Target trajectory.");
         return false;
@@ -481,44 +689,37 @@ bool ManyMovePlanner::moveToNamedTarget(const std::string &target_name, const ma
 
 bool ManyMovePlanner::moveCartesianPath(const geometry_msgs::msg::Pose &target_pose, const manymove_planner::msg::MovementConfig &config)
 {
-    // Check if already at the target pose
     if (isAtPoseTarget(target_pose))
     {
         RCLCPP_INFO(logger_, "Already at the Pose Target. No movement needed.");
         return true;
     }
 
-    // Construct the Goal message
     manymove_planner::action::MoveManipulator::Goal goal;
-    goal.movement_type = "cartesian";
-    goal.pose_target = target_pose; // Using pose_target as the single waypoint
-    // No joint values or named target needed for Cartesian movements
-    goal.start_joint_values = {}; // Empty to use current state
-    goal.config = config;
+    goal.goal.movement_type = "cartesian";
+    goal.goal.pose_target = target_pose;
+    goal.goal.start_joint_values = {};
+    goal.goal.config = config;
 
-    // Call the centralized plan() function
     auto [success, trajectory] = plan(goal);
-
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Cartesian Path.");
         return false;
     }
 
-    // Create RobotTrajectory for time parameterization
-    auto robot_traj = std::make_shared<robot_trajectory::RobotTrajectory>(
-        move_group_interface_->getRobotModel(), move_group_interface_->getName());
-    robot_traj->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), trajectory);
+    std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
+    std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {config};
+    std::vector<size_t> sizes;
+    auto [param_success, final_trajectory] = applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
 
-    // Apply time parameterization
-    if (!applyTimeParameterization(robot_traj, config))
+    if (!param_success)
     {
         RCLCPP_ERROR(logger_, "Time parameterization failed for Cartesian Path trajectory.");
         return false;
     }
 
-    // Execute the trajectory
-    if (!executeTrajectory(robot_traj))
+    if (!executeTrajectory(final_trajectory))
     {
         RCLCPP_ERROR(logger_, "Execution failed for Cartesian Path trajectory.");
         return false;
@@ -591,18 +792,17 @@ geometry_msgs::msg::Pose ManyMovePlanner::computeEndPoseFromJoints(const std::ve
 }
 
 std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> ManyMovePlanner::planSequence(
-    const std::vector<manymove_planner::action::MoveManipulator::Goal> &goals)
+    const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal)
 {
     std::vector<moveit_msgs::msg::RobotTrajectory> trajectories;
     std::vector<manymove_planner::msg::MovementConfig> configs;
 
-    if (goals.empty())
+    if (sequence_goal.goals.empty())
     {
         RCLCPP_WARN(logger_, "planSequence called with an empty goals vector.");
         return {trajectories, configs};
     }
 
-    // Helper functions
     auto areSamePoses = [&](const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance)
     {
         double dx = p1.position.x - p2.position.x;
@@ -629,48 +829,14 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
         {
             auto it = named_map.find(jn);
             if (it == named_map.end())
+            {
                 return std::vector<double>(); // Error, missing joint
+            }
             values.push_back(it->second);
         }
         return values;
     };
 
-    // First pass: Determine duplicates.
-    // We need the final state of the previous trajectory to check duplicates, but at this stage we haven't planned yet.
-    // Instead, we will simulate planning by "predicting" the end state. Actually, for duplicates, we need to rely on previous move's end state.
-    // For the first goal, there's no previous end state, so no duplicate check.
-    // For subsequent goals, we check if the current goal leads to the same final state as the last planned final state.
-
-    // We'll store the predicted final joint state after each successfully planned goal (on second phase).
-    // But we have a chicken-and-egg problem: duplicates should be identified before planning.
-    // A trick: The only reason goals are duplicates is if their final state (pose, joint values, or named target) matches the previous final state.
-    // But we don't know the previous final state's last_joint_values yet until we plan the first non-duplicate goal.
-
-    // Simplify the logic:
-    // 1. We'll plan the first goal no matter what.
-    // 2. Then we know its end state and can decide duplicates for subsequent goals on-the-fly before planning them.
-
-    // Revised approach:
-    // We'll do a single pass, planning as we go, but separating duplicate detection from planning:
-    // - For each goal:
-    //   - If first or no previous valid move: Just plan it.
-    //   - Else: Check if duplicate by comparing current goal's target end state with last_joint_values end state.
-    //     - If duplicate: record as duplicate and insert a placeholder after finishing planning all.
-    //     - If not duplicate: plan and update end state.
-
-    // Wait, this still intermixes planning and duplicate detection.
-    // The suggestion was to first identify duplicates, then plan.
-
-    // Let's try a two-pass approach that doesn't need exact final joint states for duplicates:
-    // Actually, we do need final joint states to accurately determine duplicates for pose/cartesian and named (which rely on actual end joints).
-    // For "joint" and "named" goals, we can deduce final joint states easily. For "pose"/"cartesian", we need to plan or at least know the final joint state from previous goal.
-
-    // Another strategy:
-    // Assume duplicates are checked based on the final requested target, not the actual planned end state.
-    // If the user tries the same final pose/joint/named target as the last target, it's a duplicate.
-    // This is slightly different logic than before but acceptable given the instructions. The user expects duplicates if they request the same final condition.
-
-    // We'll store the "final request" of the previous goal:
     geometry_msgs::msg::Pose last_request_pose;
     std::vector<double> last_request_joints;
     std::string last_request_named;
@@ -680,14 +846,14 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
     bool last_was_named = false;
     bool last_was_cartesian = false;
 
-    std::vector<bool> duplicates(goals.size(), false);
+    std::vector<bool> duplicates(sequence_goal.goals.size(), false);
 
-    for (size_t i = 0; i < goals.size(); ++i)
+    for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
     {
-        const auto &g = goals[i];
+        const auto g = sequence_goal.goals[i]; // Access the nested goal
         if (i == 0)
         {
-            // No previous goal, can't be duplicate
+            // No previous goal
             have_last_request = true;
             if (g.movement_type == "pose" || g.movement_type == "cartesian")
             {
@@ -713,15 +879,7 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
                 last_was_pose = false;
                 last_was_cartesian = false;
             }
-            continue; 
-        }
-
-        // For subsequent goals:
-        if (!have_last_request)
-        {
-            // This would mean previous planning failed or we never got a valid previous request.
-            // That can't happen if we fail early on plan. So assume we always have last_request after the first.
-            have_last_request = true; // Just a safety net, should never hit.
+            continue;
         }
 
         bool dup = false;
@@ -745,7 +903,8 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
                         break;
                     }
                 }
-                if (same) dup = true;
+                if (same)
+                    dup = true;
             }
         }
         else if (g.movement_type == "named")
@@ -755,6 +914,8 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
                 dup = true;
             }
         }
+
+        duplicates[i] = dup;
 
         if (!dup)
         {
@@ -784,43 +945,23 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
                 last_was_cartesian = false;
             }
         }
-
-        duplicates[i] = dup;
     }
 
-    // Now we have a duplicates vector marking which goals are duplicates.
-    // Next step: Plan only for non-duplicates.
-    // We'll store planned trajectories and configs in temporary vectors, skipping duplicates.
-    // After planning, we insert single-point for duplicates.
+    std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories(sequence_goal.goals.size());
+    std::vector<manymove_planner::msg::MovementConfig> planned_configs(sequence_goal.goals.size());
 
-    std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories(goals.size());
-    std::vector<manymove_planner::msg::MovementConfig> planned_configs(goals.size());
-
-    for (size_t i = 0; i < goals.size(); ++i)
+    for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
     {
         if (duplicates[i])
         {
-            // Skip planning now, handle later
             continue;
         }
 
-        // Plan for this goal
-        manymove_planner::action::MoveManipulator::Goal modified_goal = goals[i];
-
-        // If not first and we want to set start_joint_values from previous planned if needed:
-        // Actually, the old logic set start_joint_values from last_joint_values of the last planned trajectory.
-        // Wait, we don't have last_joint_values from actual planning now since we decided to first identify duplicates.
-        // Actually, we still can do a step-by-step approach:
-        // The suggestion was to separate logic, but we need the last joint values from the previously planned trajectory to chain them.
-        // We'll do a slight adjustment:
-        // We'll keep track of the last planned trajectory's end joint state as we plan along non-duplicates.
-        // For duplicates, we do not plan, so we do not update last_joint_values.
-
-        // Find the last non-duplicate trajectory planned before i to set start_joint_values:
+        manymove_planner::action::MoveManipulator::Goal modified_goal;
+        modified_goal.goal = sequence_goal.goals[i];
         if (i > 0)
         {
-            // Search backwards for a planned non-duplicate trajectory
-            int j = (int)i - 1;
+            int j = static_cast<int>(i) - 1;
             std::vector<double> last_valid_joints;
             while (j >= 0)
             {
@@ -833,35 +974,32 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
             }
             if (!last_valid_joints.empty())
             {
-                modified_goal.start_joint_values = last_valid_joints;
+                modified_goal.goal.start_joint_values = last_valid_joints;
             }
         }
 
         auto [success, trajectory] = plan(modified_goal);
         if (!success)
         {
-            RCLCPP_ERROR(logger_, "Planning failed for goal %zu. Returning empty.", i+1);
+            RCLCPP_ERROR(logger_, "Planning failed for goal %zu. Returning empty.", i + 1);
             return {{}, {}};
         }
 
         planned_trajectories[i] = trajectory;
-        planned_configs[i] = modified_goal.config;
+        planned_configs[i] = modified_goal.goal.config;
     }
 
-    // Now insert single-point trajectories for duplicates:
-    for (size_t i = 0; i < goals.size(); ++i)
+    for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
     {
         if (duplicates[i])
         {
-            // single-point trajectory
             moveit_msgs::msg::RobotTrajectory single_point_traj;
             single_point_traj.joint_trajectory.joint_names = move_group_interface_->getActiveJoints();
 
             trajectory_msgs::msg::JointTrajectoryPoint pt;
-            // Use last known end state of previous planned trajectory:
             std::vector<double> last_jv;
             {
-                int j = (int)i - 1;
+                int j = static_cast<int>(i) - 1;
                 while (j >= 0)
                 {
                     if (!duplicates[j] && !planned_trajectories[j].joint_trajectory.points.empty())
@@ -873,8 +1011,6 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
                 }
                 if (last_jv.empty())
                 {
-                    // If we didn't find any previous planned non-duplicate,
-                    // fallback to current joint state.
                     last_jv = move_group_interface_->getCurrentJointValues();
                 }
             }
@@ -883,15 +1019,14 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
             pt.time_from_start.sec = 0;
             pt.time_from_start.nanosec = 0;
             single_point_traj.joint_trajectory.points.push_back(pt);
-
+            // For std::thread
             planned_trajectories[i] = single_point_traj;
-            planned_configs[i] = goals[i].config; // Just use goal config
+            planned_configs[i] = sequence_goal.goals[i].config;
         }
     }
 
     return {planned_trajectories, planned_configs};
 }
-
 
 std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimeParametrizationSequence(
     const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,
@@ -908,72 +1043,86 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
     moveit_msgs::msg::RobotTrajectory concatenated;
     concatenated.joint_trajectory.joint_names = move_group_interface_->getActiveJoints();
 
-    bool first = true;
-    std::vector<size_t> segment_sizes; // temporary
+    double cumulative_time = 0.0;        // Track total time
+    std::vector<double> last_velocities; // Track last velocities for continuity
 
     for (size_t i = 0; i < trajectories.size(); ++i)
     {
         const auto &traj = trajectories[i];
         const auto &conf = configs[i];
 
-        // Convert to RobotTrajectory for parameterization
         auto robot_traj_ptr = std::make_shared<robot_trajectory::RobotTrajectory>(
             move_group_interface_->getRobotModel(), move_group_interface_->getName());
         robot_traj_ptr->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), traj);
 
-        // Apply segment-level time parameterization
+        // If not the first segment, set initial velocities based on last velocities of previous segment
+        if (i > 0 && !last_velocities.empty())
+        {
+            robot_traj_ptr->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), traj);
+            // Optionally, set initial velocities if your time parametrization method supports it
+            // This depends on the capabilities of the trajectory_processing library
+            // For example:
+            // robot_traj_ptr->getWayPoint(0).setVariableVelocity(last_velocities);
+        }
+
         if (!applyTimeParameterization(robot_traj_ptr, conf))
         {
-            RCLCPP_ERROR(logger_, "Time parameterization failed for segment %zu", i+1);
+            RCLCPP_ERROR(logger_, "Time parameterization failed for segment %zu", i + 1);
             return {false, moveit_msgs::msg::RobotTrajectory()};
         }
 
-        // Get the parameterized segment
         moveit_msgs::msg::RobotTrajectory segment;
         robot_traj_ptr->getRobotTrajectoryMsg(segment);
 
-        // If not the first segment, remove the first waypoint if it duplicates the last of concatenated
-        if (!first)
+        // Offset the time_from_start for each point in the segment
+        for (auto &point : segment.joint_trajectory.points)
         {
-            if (!concatenated.joint_trajectory.points.empty() && !segment.joint_trajectory.points.empty())
+            double original_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9;
+            double new_time = original_time + cumulative_time;
+            point.time_from_start.sec = static_cast<int>(new_time);
+            point.time_from_start.nanosec = static_cast<int>((new_time - point.time_from_start.sec) * 1e9);
+        }
+
+        // Update cumulative_time based on the last point of the segment
+        if (!segment.joint_trajectory.points.empty())
+        {
+            const auto &last_point = segment.joint_trajectory.points.back();
+            cumulative_time = last_point.time_from_start.sec + last_point.time_from_start.nanosec * 1e-9;
+
+            // Extract last velocities for continuity
+            last_velocities = last_point.velocities;
+        }
+
+        // Remove the first point of the segment if it's identical to the last point of the concatenated trajectory
+        if (!concatenated.joint_trajectory.points.empty() && !segment.joint_trajectory.points.empty())
+        {
+            const auto &prev_last = concatenated.joint_trajectory.points.back().positions;
+            const auto &current_first = segment.joint_trajectory.points.front().positions;
+            bool identical = true;
+            for (size_t idx = 0; idx < prev_last.size(); ++idx)
             {
-                const auto &prev_last = concatenated.joint_trajectory.points.back().positions;
-                const auto &current_first = segment.joint_trajectory.points.front().positions;
-                bool identical = true;
-                for (size_t idx = 0; idx < prev_last.size(); ++idx)
+                if (std::abs(prev_last[idx] - current_first[idx]) > 1e-6)
                 {
-                    if (std::abs(prev_last[idx] - current_first[idx]) > 1e-6)
-                    {
-                        identical = false;
-                        break;
-                    }
+                    identical = false;
+                    break;
                 }
-                if (identical)
-                {
-                    // Remove first point of this segment
-                    segment.joint_trajectory.points.erase(segment.joint_trajectory.points.begin());
-                }
+            }
+            if (identical)
+            {
+                segment.joint_trajectory.points.erase(segment.joint_trajectory.points.begin());
             }
         }
 
-        // Append to concatenated
+        // Append the segment to the concatenated trajectory
         size_t added_size = segment.joint_trajectory.points.size();
         concatenated.joint_trajectory.points.insert(
             concatenated.joint_trajectory.points.end(),
             segment.joint_trajectory.points.begin(),
-            segment.joint_trajectory.points.end()
-        );
+            segment.joint_trajectory.points.end());
 
-        segment_sizes.push_back(added_size);
-        if (first) first = false;
+        sizes.push_back(added_size);
     }
-
-    // Optional: Final smoothing over the entire concatenated trajectory if needed.
-    // For now, assume the per-segment parameterization and joining is sufficient.
-
-    sizes = segment_sizes;
 
     RCLCPP_INFO(logger_, "Successfully applied time parametrization sequence over %zu segments.", trajectories.size());
     return {true, concatenated};
 }
-

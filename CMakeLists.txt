@@ -16,11 +16,14 @@ find_package(pluginlib REQUIRED)
 find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(action_msgs REQUIRED)
+find_package(control_msgs REQUIRED)
 
 # Generate messages and actions
 rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveManipulator.action"
+  "action/MoveManipulatorSequence.action"
   "msg/MovementConfig.msg"
+  "msg/MoveManipulatorGoal.msg"
   DEPENDENCIES geometry_msgs action_msgs
 )
 
@@ -43,6 +46,7 @@ ament_target_dependencies(manymove_planner_lib
   tf2_geometry_msgs
   geometry_msgs
   moveit_visual_tools
+  control_msgs
   rosidl_default_runtime  # Included rosidl runtime dependencies
 )
 
