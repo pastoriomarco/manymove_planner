@@ -166,3 +166,6 @@ def generate_launch_description():
         # OpaqueFunction to set up the node
         OpaqueFunction(function=launch_setup)
     ])
+
+# Defaults to this CLI command:
+# ros2 launch xarm_moveit_config uf850_moveit_fake.launch.py add_realsense_d435i:=true add_d435i_links:=true add_other_geometry:=true geometry_type:=mesh geometry_mass:=0.3 geometry_mesh_filename:=pneumatic_lite.stl geometry_mesh_tcp_xyz:="0.03075 0 0.11885" geometry_mesh_tcp_rpy:="0 0.52 0" 
