@@ -78,16 +78,16 @@ private:
         auto send_goal_options = rclcpp_action::Client<MoveManipulator>::SendGoalOptions();
         send_goal_options.result_callback =
             [this](const rclcpp_action::ClientGoalHandle<MoveManipulator>::WrappedResult &result)
+        {
+            if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
             {
-                if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
-                {
-                    RCLCPP_INFO(this->get_logger(), "Single move succeeded: %s", result.result->message.c_str());
-                }
-                else
-                {
-                    RCLCPP_ERROR(this->get_logger(), "Single move failed with code %d", (int)result.code);
-                }
-            };
+                RCLCPP_INFO(this->get_logger(), "Single move succeeded: %s", result.result->message.c_str());
+            }
+            else
+            {
+                RCLCPP_ERROR(this->get_logger(), "Single move failed with code %d", (int)result.code);
+            }
+        };
 
         RCLCPP_INFO(this->get_logger(), "Sending single move goal");
         single_client_->async_send_goal(goal, send_goal_options);
@@ -101,35 +101,82 @@ private:
             return;
         }
 
+        // Define possible configs
+        manymove_planner::msg::MovementConfig max_move_config;
+        max_move_config.velocity_scaling_factor = 0.5;
+        max_move_config.acceleration_scaling_factor = 0.5;
+        max_move_config.step_size = 0.05;
+        max_move_config.jump_threshold = 0.0;
+        max_move_config.max_cartesian_speed = 0.5;
+        max_move_config.max_exec_tries = 5;
+        max_move_config.plan_number_target = 8;
+        max_move_config.plan_number_limit = 32;
+        max_move_config.smoothing_type = "time_optimal";
+
+        manymove_planner::msg::MovementConfig mid_move_config = max_move_config;
+        mid_move_config.velocity_scaling_factor = max_move_config.velocity_scaling_factor / 2.0;
+        mid_move_config.acceleration_scaling_factor = max_move_config.acceleration_scaling_factor / 2.0;
+        mid_move_config.max_cartesian_speed = 0.2;
+
+        manymove_planner::msg::MovementConfig slow_move_config = max_move_config;
+        slow_move_config.velocity_scaling_factor = max_move_config.velocity_scaling_factor / 4.0;
+        slow_move_config.acceleration_scaling_factor = max_move_config.acceleration_scaling_factor / 4.0;
+        slow_move_config.max_cartesian_speed = 0.05;
+
+        // Define possible moves:
+        std::vector<double> rest_joint_values = {0.0, -0.785, 0.785, 0.0, 1.57, 0.0};
+        std::vector<double> scan_sx_joint_values = {-0.175, -0.419, 1.378, 0.349, 1.535, -0.977};
+        std::vector<double> scan_dx_joint_values = {0.733, -0.297, 1.378, -0.576, 1.692, 1.291};
+
         // Create a sequence of moves
         std::vector<MoveManipulatorGoalMsg> moves;
 
         // Joint move
-        MoveManipulatorGoalMsg g1;
-        g1.movement_type = "joint";
-        g1.joint_values = {0.0, -0.785, 0.785, 0.0, 1.57, 0.0};
-        fillConfig(g1.config, 0.9, 0.9, 0.01, 0.02, 0.2, "time_optimal");
-        moves.push_back(g1);
+        MoveManipulatorGoalMsg joint_rest;
+        joint_rest.movement_type = "joint";
+        joint_rest.joint_values = rest_joint_values;
+        joint_rest.config = mid_move_config;
+        moves.push_back(joint_rest);
+
+        MoveManipulatorGoalMsg joint_scan_sx;
+        joint_scan_sx.movement_type = "joint";
+        joint_scan_sx.joint_values = scan_sx_joint_values;
+        joint_scan_sx.config = max_move_config;
+        moves.push_back(joint_scan_sx);
+
+        // joint move copying part of the previous move:
+        MoveManipulatorGoalMsg joint_scan_dx {joint_scan_sx};
+        joint_scan_dx.joint_values = scan_dx_joint_values;
+        moves.push_back(joint_scan_dx);
 
         // Pose move
-        MoveManipulatorGoalMsg g2;
-        g2.movement_type = "pose";
-        g2.pose_target.position.x = 0.2;
-        g2.pose_target.position.y = 0.1;
-        g2.pose_target.position.z = 0.2;
-        g2.pose_target.orientation.x = 1.0;
-        g2.pose_target.orientation.y = 0.0;
-        g2.pose_target.orientation.z = 0.0;
-        g2.pose_target.orientation.w = 0.0;
-        fillConfig(g2.config, 0.1, 0.1, 0.01, 0.02, 0.1, "time_optimal");
-        moves.push_back(g2);
+        MoveManipulatorGoalMsg pose_test;
+        pose_test.movement_type = "pose";
+        pose_test.pose_target.position.x = 0.2;
+        pose_test.pose_target.position.y = -0.1;
+        pose_test.pose_target.position.z = 0.3;
+        pose_test.pose_target.orientation.x = 1.0;
+        pose_test.pose_target.orientation.y = 0.0;
+        pose_test.pose_target.orientation.z = 0.0;
+        pose_test.pose_target.orientation.w = 0.0;
+        pose_test.config = mid_move_config;
+        moves.push_back(pose_test);
+
+        // Cartesian move using previous move as start
+        pose_test.movement_type = "cartesian";
+        pose_test.pose_target.position.z -= 0.1;
+        pose_test.config = slow_move_config;
+        moves.push_back(pose_test);
 
         // Named move
-        MoveManipulatorGoalMsg g3;
-        g3.movement_type = "named";
-        g3.named_target = "home";
-        fillConfig(g3.config, 0.5, 0.5, 0.01, 0.02, 0.5, "time_optimal");
-        moves.push_back(g3);
+        MoveManipulatorGoalMsg named_home;
+        named_home.movement_type = "named";
+        named_home.named_target = "home";
+        named_home.config = mid_move_config;
+        moves.push_back(named_home);
+
+        // Repeating initial move to get back to start:
+        moves.push_back(joint_rest);
 
         MoveManipulatorSequence::Goal seq_goal;
         seq_goal.goals = moves;
@@ -138,24 +185,24 @@ private:
         send_goal_options.feedback_callback =
             [this](rclcpp_action::ClientGoalHandle<MoveManipulatorSequence>::SharedPtr,
                    const std::shared_ptr<const MoveManipulatorSequence::Feedback> feedback)
-            {
-                RCLCPP_INFO(this->get_logger(), "Sequence execution progress: %.2f", feedback->progress);
-            };
+        {
+            RCLCPP_INFO(this->get_logger(), "Sequence execution progress: %.2f", feedback->progress);
+        };
 
         send_goal_options.result_callback =
             [this](const rclcpp_action::ClientGoalHandle<MoveManipulatorSequence>::WrappedResult &result)
+        {
+            if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
             {
-                if (result.code == rclcpp_action::ResultCode::SUCCEEDED)
-                {
-                    RCLCPP_INFO(this->get_logger(), "Sequence succeeded: %s", result.result->message.c_str());
-                }
-                else
-                {
-                    RCLCPP_ERROR(this->get_logger(), "Sequence failed with code %d", (int)result.code);
-                }
-                // After testing, we can shutdown
-                rclcpp::shutdown();
-            };
+                RCLCPP_INFO(this->get_logger(), "Sequence succeeded: %s", result.result->message.c_str());
+            }
+            else
+            {
+                RCLCPP_ERROR(this->get_logger(), "Sequence failed with code %d", (int)result.code);
+            }
+            // After testing, we can shutdown
+            rclcpp::shutdown();
+        };
 
         RCLCPP_INFO(this->get_logger(), "Sending sequence of %zu moves", moves.size());
         sequence_client_->async_send_goal(seq_goal, send_goal_options);
