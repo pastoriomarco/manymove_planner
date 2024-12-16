@@ -1011,8 +1011,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
     moveit_msgs::msg::RobotTrajectory concatenated;
     concatenated.joint_trajectory.joint_names = move_group_interface_->getActiveJoints();
 
-    double cumulative_time = 0.0;        // Track total time
-    std::vector<double> last_velocities; // Track last velocities for continuity
+    double cumulative_time = 0.0; // Track total time
 
     for (size_t i = 0; i < trajectories.size(); ++i)
     {
@@ -1033,25 +1032,6 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
         moveit_msgs::msg::RobotTrajectory segment;
         robot_traj_ptr->getRobotTrajectoryMsg(segment);
 
-        // Offset the time_from_start for each point in the segment
-        for (auto &point : segment.joint_trajectory.points)
-        {
-            double original_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9;
-            double new_time = original_time + cumulative_time;
-            point.time_from_start.sec = static_cast<int>(new_time);
-            point.time_from_start.nanosec = static_cast<int>((new_time - static_cast<int>(new_time)) * 1e9);
-        }
-
-        // Update cumulative_time based on the last point of the segment
-        if (!segment.joint_trajectory.points.empty())
-        {
-            const auto &last_point = segment.joint_trajectory.points.back();
-            cumulative_time = last_point.time_from_start.sec + last_point.time_from_start.nanosec * 1e-9;
-
-            // Extract last velocities for continuity (if needed)
-            last_velocities = last_point.velocities;
-        }
-
         // Remove the first point of the segment if it's identical to the last point of the concatenated trajectory
         if (!concatenated.joint_trajectory.points.empty() && !segment.joint_trajectory.points.empty())
         {
@@ -1070,6 +1050,22 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
             {
                 segment.joint_trajectory.points.erase(segment.joint_trajectory.points.begin());
             }
+        }
+
+        // Offset the time_from_start for each point in the segment
+        for (auto &point : segment.joint_trajectory.points)
+        {
+            double original_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9;
+            double new_time = original_time + cumulative_time;
+            point.time_from_start.sec = static_cast<int>(new_time);
+            point.time_from_start.nanosec = static_cast<int>((new_time - static_cast<int>(new_time)) * 1e9);
+        }
+
+        // Update cumulative_time based on the last point of the segment
+        if (!segment.joint_trajectory.points.empty())
+        {
+            const auto &last_point = segment.joint_trajectory.points.back();
+            cumulative_time = last_point.time_from_start.sec + last_point.time_from_start.nanosec * 1e-9;
         }
 
         // Append the segment to the concatenated trajectory

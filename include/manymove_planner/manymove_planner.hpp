@@ -65,7 +65,6 @@ public:
     std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
         const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal);
 
-
     // Apply time parametrization and combine into one smoothed trajectory
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
         const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,

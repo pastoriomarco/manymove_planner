@@ -103,8 +103,8 @@ private:
 
         // Define possible configs
         manymove_planner::msg::MovementConfig max_move_config;
-        max_move_config.velocity_scaling_factor = 0.5;
-        max_move_config.acceleration_scaling_factor = 0.5;
+        max_move_config.velocity_scaling_factor = 1.0;
+        max_move_config.acceleration_scaling_factor = 1.0;
         max_move_config.step_size = 0.05;
         max_move_config.jump_threshold = 0.0;
         max_move_config.max_cartesian_speed = 0.5;
