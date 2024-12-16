@@ -888,7 +888,7 @@ std::vector<double> ManyMovePlanner::getNamedTargetJoints(const std::string &nam
     return values;
 }
 
-bool ManyMovePlanner::areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance)
+bool ManyMovePlanner::areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance) const
 {
     double dx = p1.position.x - p2.position.x;
     double dy = p1.position.y - p2.position.y;
@@ -922,17 +922,14 @@ bool ManyMovePlanner::areSameJointTargets(const std::vector<double> &j1, const s
     return true;
 }
 
-// Updated planSequence function in manymove_planner.cpp
-
 std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> ManyMovePlanner::planSequence(
     const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal)
 {
     std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories;
     std::vector<manymove_planner::msg::MovementConfig> planned_configs;
 
-    // Initialize previous end pose and joint targets
+    // Initialize previous end joint targets
     std::vector<double> previous_end_joint_targets;
-    // geometry_msgs::msg::Pose previous_end_pose;
 
     if (sequence_goal.goals.empty())
     {
@@ -950,40 +947,41 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
 
         if (planned_trajectories.empty())
         {
-            // Check if the first goal has start_joint_values
+            // If there isn't a previous planned trajectory, check if the first goal has start_joint_values
             const auto &first_goal = sequence_goal.goals[0];
             if (!first_goal.start_joint_values.empty())
             {
                 previous_end_joint_targets = first_goal.start_joint_values;
-                // previous_end_pose = computeEndPoseFromJoints(previous_end_joint_targets);
-                RCLCPP_INFO(logger_, "Initialized previous_end_pose from start_joint_values of the first goal.");
+                RCLCPP_INFO(logger_, "Initialized previous_end_joint_targets from start_joint_values of the first goal.");
             }
             else
             {
                 previous_end_joint_targets = move_group_interface_->getCurrentJointValues();
-                // previous_end_pose = move_group_interface_->getCurrentPose(tcp_frame_).pose;
-                RCLCPP_INFO(logger_, "Initialized previous_end_pose from the current robot pose.");
+                RCLCPP_INFO(logger_, "Initialized previous_end_joint_targets from the current robot pose.");
             }
         }
         else
         {
+            // There is a previously planned trajectory, we'll use its joint targets as start pose
             previous_end_joint_targets = planned_trajectories.back().joint_trajectory.points.back().positions;
-            // previous_end_pose = computeEndPoseFromJoints(previous_end_joint_targets);
         }
 
+        // Assigning the right joint targets to the start_joint_values to compute the trajectory
         modified_goal.goal.start_joint_values = previous_end_joint_targets;
 
         // Plan the trajectory for the current move
         auto [success, trajectory] = plan(modified_goal);
         if (!success)
         {
+            // if one trajectory planning fails, abort the planning sequence
             RCLCPP_ERROR(logger_, "Planning failed for move %zu. Aborting sequence.", i + 1);
-            // Optionally, you can choose to continue instead of aborting
+            // to evaluate if return some indicator of which trajectory failed
             return {{}, {}};
         }
 
         if (areSameJointTargets(trajectory.joint_trajectory.points.back().positions, previous_end_joint_targets, pose_tolerance))
         {
+            // if the pose at the end of the latest trajectory is the same as the previous one, there is no movement to do, skip the trajectory
             RCLCPP_ERROR(logger_, "Resulting trajectory too small, skipping");
         }
         else
@@ -994,6 +992,7 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
         }
     }
 
+    // the number of planned trajectories can vary from the lenght of the input vectors due to duplicated points removal!
     return {planned_trajectories, planned_configs};
 }
 

@@ -48,6 +48,7 @@ public:
     bool isAtJointTarget(const std::vector<double> &joint_values, double tolerance = 1e-2) const;
     bool isAtNamedTarget(const std::string &target_name, double tolerance = 1e-2) const;
     bool areSameJointTargets(const std::vector<double> &j1, const std::vector<double> &j2, double tolerance) const;
+    bool areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance) const;
 
     // Single movement commands
     bool moveToPoseTarget(const geometry_msgs::msg::Pose &target_pose, const manymove_planner::msg::MovementConfig &config);
@@ -63,6 +64,7 @@ public:
     // Plan a sequence of moves
     std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
         const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal);
+
 
     // Apply time parametrization and combine into one smoothed trajectory
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
@@ -81,13 +83,13 @@ public:
         const moveit_msgs::msg::RobotTrajectory &trajectory);
 
 private:
-    bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
     double computeMaxCartesianSpeed(const robot_trajectory::RobotTrajectoryPtr &trajectory) const;
-
     geometry_msgs::msg::Pose computeEndPoseFromJoints(const std::vector<double> &joint_values) const;
+
     std::vector<double> getNamedTargetJoints(const std::string &name);
-    bool areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance);
+    
+    bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Logger logger_;
