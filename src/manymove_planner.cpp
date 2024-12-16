@@ -870,237 +870,127 @@ geometry_msgs::msg::Pose ManyMovePlanner::computeEndPoseFromJoints(const std::ve
     return pose_msg;
 }
 
+std::vector<double> ManyMovePlanner::getNamedTargetJoints(const std::string &name)
+{
+    std::map<std::string, double> named_map = move_group_interface_->getNamedTargetValues(name);
+    const auto &joint_names = move_group_interface_->getJoints();
+    std::vector<double> values;
+    values.reserve(joint_names.size());
+    for (const auto &jn : joint_names)
+    {
+        auto it = named_map.find(jn);
+        if (it == named_map.end())
+        {
+            return std::vector<double>();
+        }
+        values.push_back(it->second);
+    }
+    return values;
+}
+
+bool ManyMovePlanner::areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance)
+{
+    double dx = p1.position.x - p2.position.x;
+    double dy = p1.position.y - p2.position.y;
+    double dz = p1.position.z - p2.position.z;
+    double pos_dist = std::sqrt(dx * dx + dy * dy + dz * dz);
+
+    double ox = std::abs(p1.orientation.x - p2.orientation.x);
+    double oy = std::abs(p1.orientation.y - p2.orientation.y);
+    double oz = std::abs(p1.orientation.z - p2.orientation.z);
+    double ow = std::abs(p1.orientation.w - p2.orientation.w);
+    double ori_diff = ox + oy + oz + ow;
+
+    return (pos_dist < tolerance && ori_diff < tolerance);
+}
+
+bool ManyMovePlanner::areSameJointTargets(const std::vector<double> &j1, const std::vector<double> &j2, double tolerance) const
+{
+    if (j1.size() != j2.size())
+    {
+        return false;
+    }
+
+    for (size_t i = 0; i < j1.size(); i++)
+    {
+        if (std::abs(j1[i] - j2[i]) > tolerance)
+        {
+            return false;
+        }
+    }
+
+    return true;
+}
+
+// Updated planSequence function in manymove_planner.cpp
+
 std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> ManyMovePlanner::planSequence(
     const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal)
 {
-    std::vector<moveit_msgs::msg::RobotTrajectory> trajectories;
-    std::vector<manymove_planner::msg::MovementConfig> configs;
+    std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories;
+    std::vector<manymove_planner::msg::MovementConfig> planned_configs;
+
+    // Initialize previous end pose and joint targets
+    std::vector<double> previous_end_joint_targets;
+    // geometry_msgs::msg::Pose previous_end_pose;
 
     if (sequence_goal.goals.empty())
     {
         RCLCPP_WARN(logger_, "planSequence called with an empty goals vector.");
-        return {trajectories, configs};
+        return {planned_trajectories, planned_configs};
     }
 
-    auto areSamePoses = [&](const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance)
-    {
-        double dx = p1.position.x - p2.position.x;
-        double dy = p1.position.y - p2.position.y;
-        double dz = p1.position.z - p2.position.z;
-        double pos_dist = std::sqrt(dx * dx + dy * dy + dz * dz);
-
-        double ox = std::abs(p1.orientation.x - p2.orientation.x);
-        double oy = std::abs(p1.orientation.y - p2.orientation.y);
-        double oz = std::abs(p1.orientation.z - p2.orientation.z);
-        double ow = std::abs(p1.orientation.w - p2.orientation.w);
-        double ori_diff = ox + oy + oz + ow;
-
-        return (pos_dist < tolerance && ori_diff < tolerance);
-    };
-
-    // auto getNamedTargetJoints = [&](const std::string &name) -> std::vector<double>
-    // {
-    //     std::map<std::string, double> named_map = move_group_interface_->getNamedTargetValues(name);
-    //     const auto &joint_names = move_group_interface_->getJoints();
-    //     std::vector<double> values;
-    //     values.reserve(joint_names.size());
-    //     for (const auto &jn : joint_names)
-    //     {
-    //         auto it = named_map.find(jn);
-    //         if (it == named_map.end())
-    //         {
-    //             return std::vector<double>(); // Error, missing joint
-    //         }
-    //         values.push_back(it->second);
-    //     }
-    //     return values;
-    // };
-
-    geometry_msgs::msg::Pose last_request_pose;
-    std::vector<double> last_request_joints;
-    std::string last_request_named;
-    // bool have_last_request = false;
-    bool last_was_pose = false;
-    bool last_was_joint = false;
-    bool last_was_named = false;
-    bool last_was_cartesian = false;
-
-    std::vector<bool> duplicates(sequence_goal.goals.size(), false);
+    const double pose_tolerance = 1e-3; // Define a suitable tolerance
 
     for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
     {
-        const auto g = sequence_goal.goals[i]; // Access the nested goal
-        if (i == 0)
-        {
-            // No previous goal
-            // have_last_request = true;
-            if (g.movement_type == "pose" || g.movement_type == "cartesian")
-            {
-                last_request_pose = g.pose_target;
-                last_was_pose = (g.movement_type == "pose");
-                last_was_cartesian = (g.movement_type == "cartesian");
-                last_was_joint = false;
-                last_was_named = false;
-            }
-            else if (g.movement_type == "joint")
-            {
-                last_request_joints = g.joint_values;
-                last_was_joint = true;
-                last_was_pose = false;
-                last_was_named = false;
-                last_was_cartesian = false;
-            }
-            else if (g.movement_type == "named")
-            {
-                last_request_named = g.named_target;
-                last_was_named = true;
-                last_was_joint = false;
-                last_was_pose = false;
-                last_was_cartesian = false;
-            }
-            continue;
-        }
-
-        bool dup = false;
-        if (g.movement_type == "pose" || g.movement_type == "cartesian")
-        {
-            if ((last_was_pose || last_was_cartesian) && areSamePoses(last_request_pose, g.pose_target, 1e-3))
-            {
-                dup = true;
-            }
-        }
-        else if (g.movement_type == "joint")
-        {
-            if (last_was_joint && last_request_joints.size() == g.joint_values.size())
-            {
-                bool same = true;
-                for (size_t idx = 0; idx < g.joint_values.size(); ++idx)
-                {
-                    if (std::abs(last_request_joints[idx] - g.joint_values[idx]) > 1e-3)
-                    {
-                        same = false;
-                        break;
-                    }
-                }
-                if (same)
-                    dup = true;
-            }
-        }
-        else if (g.movement_type == "named")
-        {
-            if (last_was_named && (last_request_named == g.named_target))
-            {
-                dup = true;
-            }
-        }
-
-        duplicates[i] = dup;
-
-        if (!dup)
-        {
-            // Update last request
-            if (g.movement_type == "pose" || g.movement_type == "cartesian")
-            {
-                last_request_pose = g.pose_target;
-                last_was_pose = (g.movement_type == "pose");
-                last_was_cartesian = (g.movement_type == "cartesian");
-                last_was_joint = false;
-                last_was_named = false;
-            }
-            else if (g.movement_type == "joint")
-            {
-                last_request_joints = g.joint_values;
-                last_was_joint = true;
-                last_was_pose = false;
-                last_was_named = false;
-                last_was_cartesian = false;
-            }
-            else if (g.movement_type == "named")
-            {
-                last_request_named = g.named_target;
-                last_was_named = true;
-                last_was_pose = false;
-                last_was_joint = false;
-                last_was_cartesian = false;
-            }
-        }
-    }
-
-    std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories(sequence_goal.goals.size());
-    std::vector<manymove_planner::msg::MovementConfig> planned_configs(sequence_goal.goals.size());
-
-    for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
-    {
-        if (duplicates[i])
-        {
-            continue;
-        }
-
         manymove_planner::action::MoveManipulator::Goal modified_goal;
+
         modified_goal.goal = sequence_goal.goals[i];
-        if (i > 0)
+
+        if (planned_trajectories.empty())
         {
-            int j = static_cast<int>(i) - 1;
-            std::vector<double> last_valid_joints;
-            while (j >= 0)
+            // Check if the first goal has start_joint_values
+            const auto &first_goal = sequence_goal.goals[0];
+            if (!first_goal.start_joint_values.empty())
             {
-                if (!duplicates[j] && !planned_trajectories[j].joint_trajectory.points.empty())
-                {
-                    last_valid_joints = planned_trajectories[j].joint_trajectory.points.back().positions;
-                    break;
-                }
-                j--;
+                previous_end_joint_targets = first_goal.start_joint_values;
+                // previous_end_pose = computeEndPoseFromJoints(previous_end_joint_targets);
+                RCLCPP_INFO(logger_, "Initialized previous_end_pose from start_joint_values of the first goal.");
             }
-            if (!last_valid_joints.empty())
+            else
             {
-                modified_goal.goal.start_joint_values = last_valid_joints;
+                previous_end_joint_targets = move_group_interface_->getCurrentJointValues();
+                // previous_end_pose = move_group_interface_->getCurrentPose(tcp_frame_).pose;
+                RCLCPP_INFO(logger_, "Initialized previous_end_pose from the current robot pose.");
             }
         }
+        else
+        {
+            previous_end_joint_targets = planned_trajectories.back().joint_trajectory.points.back().positions;
+            // previous_end_pose = computeEndPoseFromJoints(previous_end_joint_targets);
+        }
 
+        modified_goal.goal.start_joint_values = previous_end_joint_targets;
+
+        // Plan the trajectory for the current move
         auto [success, trajectory] = plan(modified_goal);
         if (!success)
         {
-            RCLCPP_ERROR(logger_, "Planning failed for goal %zu. Returning empty.", i + 1);
+            RCLCPP_ERROR(logger_, "Planning failed for move %zu. Aborting sequence.", i + 1);
+            // Optionally, you can choose to continue instead of aborting
             return {{}, {}};
         }
 
-        planned_trajectories[i] = trajectory;
-        planned_configs[i] = modified_goal.goal.config;
-    }
-
-    for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
-    {
-        if (duplicates[i])
+        if (areSameJointTargets(trajectory.joint_trajectory.points.back().positions, previous_end_joint_targets, pose_tolerance))
         {
-            moveit_msgs::msg::RobotTrajectory single_point_traj;
-            single_point_traj.joint_trajectory.joint_names = move_group_interface_->getActiveJoints();
-
-            trajectory_msgs::msg::JointTrajectoryPoint pt;
-            std::vector<double> last_jv;
-            {
-                int j = static_cast<int>(i) - 1;
-                while (j >= 0)
-                {
-                    if (!duplicates[j] && !planned_trajectories[j].joint_trajectory.points.empty())
-                    {
-                        last_jv = planned_trajectories[j].joint_trajectory.points.back().positions;
-                        break;
-                    }
-                    j--;
-                }
-                if (last_jv.empty())
-                {
-                    last_jv = move_group_interface_->getCurrentJointValues();
-                }
-            }
-
-            pt.positions = last_jv;
-            pt.time_from_start.sec = 0;
-            pt.time_from_start.nanosec = 0;
-            single_point_traj.joint_trajectory.points.push_back(pt);
-            // For std::thread
-            planned_trajectories[i] = single_point_traj;
-            planned_configs[i] = sequence_goal.goals[i].config;
+            RCLCPP_ERROR(logger_, "Resulting trajectory too small, skipping");
+        }
+        else
+        {
+            // Append the planned trajectory and its config to the lists
+            planned_trajectories.push_back(trajectory);
+            planned_configs.push_back(modified_goal.goal.config);
         }
     }
 
@@ -1134,16 +1024,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
             move_group_interface_->getRobotModel(), move_group_interface_->getName());
         robot_traj_ptr->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), traj);
 
-        // If not the first segment, set initial velocities based on last velocities of previous segment
-        if (i > 0 && !last_velocities.empty())
-        {
-            robot_traj_ptr->setRobotTrajectoryMsg(*move_group_interface_->getCurrentState(), traj);
-            // Optionally, set initial velocities if your time parametrization method supports it
-            // This depends on the capabilities of the trajectory_processing library
-            // For example:
-            // robot_traj_ptr->getWayPoint(0).setVariableVelocity(last_velocities);
-        }
-
+        // Apply time parameterization
         if (!applyTimeParameterization(robot_traj_ptr, conf))
         {
             RCLCPP_ERROR(logger_, "Time parameterization failed for segment %zu", i + 1);
@@ -1159,7 +1040,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
             double original_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9;
             double new_time = original_time + cumulative_time;
             point.time_from_start.sec = static_cast<int>(new_time);
-            point.time_from_start.nanosec = static_cast<int>((new_time - point.time_from_start.sec) * 1e9);
+            point.time_from_start.nanosec = static_cast<int>((new_time - static_cast<int>(new_time)) * 1e9);
         }
 
         // Update cumulative_time based on the last point of the segment
@@ -1168,7 +1049,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::applyTimePar
             const auto &last_point = segment.joint_trajectory.points.back();
             cumulative_time = last_point.time_from_start.sec + last_point.time_from_start.nanosec * 1e-9;
 
-            // Extract last velocities for continuity
+            // Extract last velocities for continuity (if needed)
             last_velocities = last_point.velocities;
         }
 
