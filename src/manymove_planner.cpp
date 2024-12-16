@@ -32,23 +32,59 @@ ManyMovePlanner::ManyMovePlanner(
         RCLCPP_INFO(logger_, "FollowJointTrajectory action server available");
     }
 }
-
 double ManyMovePlanner::computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const
 {
     const auto &joint_trajectory = trajectory.joint_trajectory;
     double total_length = 0.0;
 
-    for (size_t i = 1; i < joint_trajectory.points.size(); ++i)
+    // Compute joint-space path length
+    auto computeJointPathLength = [&](const trajectory_msgs::msg::JointTrajectory &traj)
     {
-        double segment_length = 0.0;
-        for (size_t j = 0; j < joint_trajectory.points[i].positions.size(); ++j)
+        double length = 0.0;
+        for (size_t i = 1; i < traj.points.size(); ++i)
         {
-            double diff = joint_trajectory.points[i].positions[j] - joint_trajectory.points[i - 1].positions[j];
-            segment_length += diff * diff;
+            double segment_length = 0.0;
+            for (size_t j = 0; j < traj.points[i].positions.size(); ++j)
+            {
+                double diff = traj.points[i].positions[j] - traj.points[i - 1].positions[j];
+                segment_length += diff * diff;
+            }
+            length += std::sqrt(segment_length);
         }
-        total_length += std::sqrt(segment_length);
-    }
+        return length;
+    };
 
+    // Compute Cartesian path length
+    auto computeCartesianPathLength = [&]()
+    {
+        if (trajectory.multi_dof_joint_trajectory.joint_names.empty())
+            return 0.0;
+
+        double length = 0.0;
+        for (size_t i = 1; i < trajectory.multi_dof_joint_trajectory.points.size(); ++i)
+        {
+            const auto &prev_point = trajectory.multi_dof_joint_trajectory.points[i - 1];
+            const auto &curr_point = trajectory.multi_dof_joint_trajectory.points[i];
+
+            if (prev_point.transforms.empty() || curr_point.transforms.empty())
+                continue;
+
+            const auto &prev_transform = prev_point.transforms[0];
+            const auto &curr_transform = curr_point.transforms[0];
+
+            Eigen::Vector3d prev_pos(prev_transform.translation.x, prev_transform.translation.y, prev_transform.translation.z);
+            Eigen::Vector3d curr_pos(curr_transform.translation.x, curr_transform.translation.y, curr_transform.translation.z);
+
+            double dist = (curr_pos - prev_pos).norm();
+            length += dist;
+        }
+        return length;
+    };
+
+    double joint_length = computeJointPathLength(joint_trajectory);
+    double cart_length = computeCartesianPathLength();
+
+    total_length = (2 * cart_length) + (joint_length / 2.0);
     return total_length;
 }
 
@@ -268,24 +304,66 @@ bool ManyMovePlanner::executeTrajectoryWithFeedback(
         return std::sqrt(distance);
     };
 
-    // Helper function to find the closest waypoint index based on actual positions
+    // Variable to track the last found waypoint index
+    size_t last_found_index = 0;
+
+    // Updated helper function to find the closest waypoint index
     auto findClosestWaypoint = [&](const std::vector<trajectory_msgs::msg::JointTrajectoryPoint> &waypoints,
                                    const std::vector<double> &actual_positions) -> size_t
     {
-        size_t closest_idx = 0;
+        // Define a search window around the last found index
+        // Start 2 points before the last found index, but not less than 0
+        int start_search = static_cast<int>(last_found_index) - 2;
+        if (start_search < 0)
+            start_search = 0;
+
+        // End the search at last_found_index + 16 or the end of the waypoint list
+        size_t end_search = std::min(last_found_index + 16, waypoints.size());
+
+        double tolerance = 1e-2; // Increased tolerance from 1e-4 to 1e-2
+        size_t best_idx = last_found_index;
         double min_distance = std::numeric_limits<double>::max();
 
-        for (size_t i = 0; i < waypoints.size(); ++i)
+        // Search the defined window for the closest waypoint
+        for (size_t i = static_cast<size_t>(start_search); i < end_search; ++i)
         {
             double distance = computeDistance(actual_positions, waypoints[i].positions);
+
+            // Debugging: Log the distance for each waypoint in the search window
+            RCLCPP_DEBUG(logger_, "Waypoint %zu distance: %.6f", i, distance);
+
             if (distance < min_distance)
             {
                 min_distance = distance;
-                closest_idx = i;
+                best_idx = i;
+            }
+
+            // If within tolerance, prioritize this waypoint
+            if (distance <= tolerance)
+            {
+                best_idx = i;
+                min_distance = distance;
+                break; // Exit early if within tolerance
             }
         }
 
-        return closest_idx;
+        // Update last_found_index to the best found index if it has advanced
+        if (best_idx > last_found_index)
+        {
+            RCLCPP_DEBUG(logger_, "Updating last_found_index from %zu to %zu", last_found_index, best_idx);
+            last_found_index = best_idx;
+        }
+        else if (best_idx == last_found_index && last_found_index < waypoints.size() - 1)
+        {
+            // If best_idx hasn't advanced and it's not at the end, try to increment it
+            last_found_index = std::min(last_found_index + 1, waypoints.size() - 1);
+            RCLCPP_DEBUG(logger_, "Incrementing last_found_index to %zu", last_found_index);
+        }
+
+        // Debugging: Log the selected closest index and its distance
+        RCLCPP_DEBUG(logger_, "Selected closest_idx: %zu with distance: %.6f", best_idx, min_distance);
+
+        return best_idx;
     };
 
     // Updated feedback callback
@@ -298,18 +376,18 @@ bool ManyMovePlanner::executeTrajectoryWithFeedback(
         // Extract actual positions from feedback
         std::vector<double> actual_positions = feedback->actual.positions;
 
-        // // Debugging: Print actual positions
-        // std::stringstream pos_stream;
-        // pos_stream << "Actual Positions: ";
-        // for (const auto &pos : actual_positions)
-        //     pos_stream << pos << " ";
-        // RCLCPP_INFO(logger_, "%s", pos_stream.str().c_str());
+        // Debugging: Print actual positions
+        std::stringstream pos_stream;
+        pos_stream << "Actual Positions: ";
+        for (const auto &pos : actual_positions)
+            pos_stream << pos << " ";
+        RCLCPP_DEBUG(logger_, "%s", pos_stream.str().c_str());
 
         // Find the closest waypoint index
         size_t closest_idx = findClosestWaypoint(points, actual_positions);
 
-        // // Debugging: Print closest waypoint index
-        // RCLCPP_INFO(logger_, "Closest Waypoint Index: %zu", closest_idx);
+        // Debugging: Print closest waypoint index
+        RCLCPP_DEBUG(logger_, "Closest Waypoint Index: %zu", closest_idx);
 
         // Determine current segment based on sizes
         size_t segment_index = 0;
@@ -820,28 +898,28 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
         return (pos_dist < tolerance && ori_diff < tolerance);
     };
 
-    auto getNamedTargetJoints = [&](const std::string &name) -> std::vector<double>
-    {
-        std::map<std::string, double> named_map = move_group_interface_->getNamedTargetValues(name);
-        const auto &joint_names = move_group_interface_->getJoints();
-        std::vector<double> values;
-        values.reserve(joint_names.size());
-        for (const auto &jn : joint_names)
-        {
-            auto it = named_map.find(jn);
-            if (it == named_map.end())
-            {
-                return std::vector<double>(); // Error, missing joint
-            }
-            values.push_back(it->second);
-        }
-        return values;
-    };
+    // auto getNamedTargetJoints = [&](const std::string &name) -> std::vector<double>
+    // {
+    //     std::map<std::string, double> named_map = move_group_interface_->getNamedTargetValues(name);
+    //     const auto &joint_names = move_group_interface_->getJoints();
+    //     std::vector<double> values;
+    //     values.reserve(joint_names.size());
+    //     for (const auto &jn : joint_names)
+    //     {
+    //         auto it = named_map.find(jn);
+    //         if (it == named_map.end())
+    //         {
+    //             return std::vector<double>(); // Error, missing joint
+    //         }
+    //         values.push_back(it->second);
+    //     }
+    //     return values;
+    // };
 
     geometry_msgs::msg::Pose last_request_pose;
     std::vector<double> last_request_joints;
     std::string last_request_named;
-    bool have_last_request = false;
+    // bool have_last_request = false;
     bool last_was_pose = false;
     bool last_was_joint = false;
     bool last_was_named = false;
@@ -855,7 +933,7 @@ std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_p
         if (i == 0)
         {
             // No previous goal
-            have_last_request = true;
+            // have_last_request = true;
             if (g.movement_type == "pose" || g.movement_type == "cartesian")
             {
                 last_request_pose = g.pose_target;
