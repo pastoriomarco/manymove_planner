@@ -60,23 +60,23 @@ def launch_setup(context, *args, **kwargs):
     tcp_frame = LaunchConfiguration('tcp_frame')
     traj_controller = LaunchConfiguration('traj_controller')
 
-    ros2_control_plugin = 'uf_robot_hardware/UFRobotFakeSystemHardware'
-    controllers_name = 'fake_controllers'
-    xarm_type = '{}{}'.format(robot_type.perform(context), dof.perform(context) if robot_type.perform(context) in ('xarm', 'lite') else '')
+    # ros2_control_plugin = 'uf_robot_hardware/UFRobotFakeSystemHardware'
+    # controllers_name = 'fake_controllers'
+    # xarm_type = '{}{}'.format(robot_type.perform(context), dof.perform(context) if robot_type.perform(context) in ('xarm', 'lite') else '')
 
-    ros2_control_params = generate_ros2_control_params_temp_file(
-        os.path.join(get_package_share_directory('xarm_controller'), 'config', '{}_controllers.yaml'.format(xarm_type)),
-        prefix=prefix.perform(context), 
-        add_gripper=add_gripper.perform(context) in ('True', 'true'),
-        add_bio_gripper=add_bio_gripper.perform(context) in ('True', 'true'),
-        ros_namespace=ros_namespace,
-        robot_type=robot_type.perform(context)
-    )
+    # ros2_control_params = generate_ros2_control_params_temp_file(
+    #     os.path.join(get_package_share_directory('xarm_controller'), 'config', '{}_controllers.yaml'.format(xarm_type)),
+    #     prefix=prefix.perform(context), 
+    #     add_gripper=add_gripper.perform(context) in ('True', 'true'),
+    #     add_bio_gripper=add_bio_gripper.perform(context) in ('True', 'true'),
+    #     ros_namespace=ros_namespace,
+    #     robot_type=robot_type.perform(context)
+    # )
 
     # Initialize MoveIt Configurations
     moveit_configs = MoveItConfigsBuilder(
         context=context,
-        controllers_name=controllers_name,
+        # controllers_name=controllers_name,
         dof=dof,
         robot_type=robot_type,
         prefix=prefix,
@@ -91,8 +91,8 @@ def launch_setup(context, *args, **kwargs):
         attach_rpy=attach_rpy,
         mesh_suffix=mesh_suffix,
         kinematics_suffix=kinematics_suffix,
-        ros2_control_plugin=ros2_control_plugin,
-        ros2_control_params=ros2_control_params,
+        # ros2_control_plugin=ros2_control_plugin,
+        # ros2_control_params=ros2_control_params,
         add_gripper=add_gripper,
         add_vacuum_gripper=add_vacuum_gripper,
         add_bio_gripper=add_bio_gripper,
