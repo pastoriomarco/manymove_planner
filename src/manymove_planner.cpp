@@ -131,17 +131,34 @@ bool ManyMovePlanner::applyTimeParameterization(robot_trajectory::RobotTrajector
             trajectory_processing::IterativeSplineParameterization time_param;
             time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
+        else if (config.smoothing_type == "ruckig")
+        {
+            trajectory_processing::IterativeSplineParameterization time_param;
+            time_param_success = trajectory_processing::RuckigSmoothing::applySmoothing(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+        }
         else
         {
             // Default fallback
-            trajectory_processing::IterativeSplineParameterization time_param;
+            trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
             time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
 
         if (!time_param_success)
         {
             RCLCPP_ERROR(logger_, "Failed to compute time stamps using '%s'", config.smoothing_type.c_str());
-            return false;
+
+            // try fallback approach:
+
+            // Reset durations again
+            for (size_t i = 1; i < trajectory->getWayPointCount(); i++)
+                trajectory->setWayPointDurationFromPrevious(i, 0.0);
+            trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
+            time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+
+            if (!time_param_success)
+            {
+                return false;
+            }
         }
 
         double max_speed = computeMaxCartesianSpeed(trajectory);
@@ -168,17 +185,17 @@ bool ManyMovePlanner::applyTimeParameterization(robot_trajectory::RobotTrajector
     return false;
 }
 
-std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const manymove_planner::action::MoveManipulator::Goal &goal)
+std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const manymove_planner::action::MoveManipulator::Goal &goal_msg)
 {
     std::vector<std::pair<moveit_msgs::msg::RobotTrajectory, double>> trajectories;
 
     // Handle start state
-    if (!goal.goal.start_joint_values.empty())
+    if (!goal_msg.goal.start_joint_values.empty())
     {
         moveit::core::RobotState start_state(*move_group_interface_->getCurrentState());
         const moveit::core::JointModelGroup *joint_model_group = start_state.getJointModelGroup(move_group_interface_->getName());
 
-        start_state.setJointGroupPositions(joint_model_group, goal.goal.start_joint_values);
+        start_state.setJointGroupPositions(joint_model_group, goal_msg.goal.start_joint_values);
         move_group_interface_->setStartState(start_state);
     }
     else
@@ -187,28 +204,28 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
     }
 
     // Set scaling factors
-    move_group_interface_->setMaxVelocityScalingFactor(goal.goal.config.velocity_scaling_factor);
-    move_group_interface_->setMaxAccelerationScalingFactor(goal.goal.config.acceleration_scaling_factor);
+    move_group_interface_->setMaxVelocityScalingFactor(goal_msg.goal.config.velocity_scaling_factor);
+    move_group_interface_->setMaxAccelerationScalingFactor(goal_msg.goal.config.acceleration_scaling_factor);
 
     // Set movement targets
-    if ((goal.goal.movement_type == "pose") || (goal.goal.movement_type == "joint") || (goal.goal.movement_type == "named"))
+    if ((goal_msg.goal.movement_type == "pose") || (goal_msg.goal.movement_type == "joint") || (goal_msg.goal.movement_type == "named"))
     {
-        if (goal.goal.movement_type == "pose")
+        if (goal_msg.goal.movement_type == "pose")
         {
-            move_group_interface_->setPoseTarget(goal.goal.pose_target, tcp_frame_);
+            move_group_interface_->setPoseTarget(goal_msg.goal.pose_target, tcp_frame_);
         }
-        else if (goal.goal.movement_type == "joint")
+        else if (goal_msg.goal.movement_type == "joint")
         {
-            move_group_interface_->setJointValueTarget(goal.goal.joint_values);
+            move_group_interface_->setJointValueTarget(goal_msg.goal.joint_values);
         }
-        else if (goal.goal.movement_type == "named")
+        else if (goal_msg.goal.movement_type == "named")
         {
-            move_group_interface_->setNamedTarget(goal.goal.named_target);
+            move_group_interface_->setNamedTarget(goal_msg.goal.named_target);
         }
 
         // Plan multiple trajectories
         int attempts = 0;
-        while (attempts < goal.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.goal.config.plan_number_target)
+        while (attempts < goal_msg.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal_msg.goal.config.plan_number_target)
         {
             moveit::planning_interface::MoveGroupInterface::Plan plan;
             if (move_group_interface_->plan(plan) == moveit::core::MoveItErrorCode::SUCCESS)
@@ -219,23 +236,24 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
             else
             {
                 RCLCPP_WARN(logger_, "%s target planning attempt %d failed.",
-                            goal.goal.movement_type.c_str(), attempts + 1);
+                            goal_msg.goal.movement_type.c_str(), attempts + 1);
             }
             attempts++;
         }
     }
-    else if (goal.goal.movement_type == "cartesian")
+    else if (goal_msg.goal.movement_type == "cartesian")
     {
         // Cartesian movement
         std::vector<geometry_msgs::msg::Pose> waypoints;
-        waypoints.push_back(goal.goal.pose_target);
+        waypoints.push_back(goal_msg.goal.pose_target);
 
         int attempts = 0;
-        while (attempts < goal.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal.goal.config.plan_number_target)
+        while (attempts < goal_msg.goal.config.plan_number_limit && static_cast<int>(trajectories.size()) < goal_msg.goal.config.plan_number_target)
         {
             moveit::planning_interface::MoveGroupInterface::Plan plan;
+            RCLCPP_INFO_STREAM(logger_, "Cartesian path planning attempt with step size " << goal_msg.goal.config.step_size << ", jump threshold " << goal_msg.goal.config.jump_threshold);
             double fraction = move_group_interface_->computeCartesianPath(
-                waypoints, goal.goal.config.step_size, goal.goal.config.jump_threshold, plan.trajectory_);
+                waypoints, goal_msg.goal.config.step_size, goal_msg.goal.config.jump_threshold, plan.trajectory_);
 
             if (fraction >= 1.0)
             {
@@ -251,13 +269,13 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> ManyMovePlanner::plan(const m
     }
     else
     {
-        RCLCPP_ERROR(logger_, "Unknown movement_type: %s", goal.goal.movement_type.c_str());
+        RCLCPP_ERROR(logger_, "Unknown movement_type: %s", goal_msg.goal.movement_type.c_str());
         return {false, moveit_msgs::msg::RobotTrajectory()};
     }
 
     if (trajectories.empty())
     {
-        RCLCPP_ERROR(logger_, "No valid trajectory found for movement_type: %s", goal.goal.movement_type.c_str());
+        RCLCPP_ERROR(logger_, "No valid trajectory found for movement_type: %s", goal_msg.goal.movement_type.c_str());
         return {false, moveit_msgs::msg::RobotTrajectory()};
     }
 
@@ -648,13 +666,13 @@ bool ManyMovePlanner::moveToPoseTarget(const geometry_msgs::msg::Pose &target_po
         return true;
     }
 
-    manymove_planner::action::MoveManipulator::Goal goal;
-    goal.goal.movement_type = "pose";
-    goal.goal.pose_target = target_pose;
-    goal.goal.start_joint_values = {};
-    goal.goal.config = config;
+    manymove_planner::action::MoveManipulator::Goal goal_msg;
+    goal_msg.goal.movement_type = "pose";
+    goal_msg.goal.pose_target = target_pose;
+    goal_msg.goal.start_joint_values = {};
+    goal_msg.goal.config = config;
 
-    auto [success, trajectory] = plan(goal);
+    auto [success, trajectory] = plan(goal_msg);
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Pose Target.");
@@ -690,13 +708,13 @@ bool ManyMovePlanner::moveToJointTarget(const std::vector<double> &joint_values,
         return true;
     }
 
-    manymove_planner::action::MoveManipulator::Goal goal;
-    goal.goal.movement_type = "joint";
-    goal.goal.joint_values = joint_values;
-    goal.goal.start_joint_values = {};
-    goal.goal.config = config;
+    manymove_planner::action::MoveManipulator::Goal goal_msg;
+    goal_msg.goal.movement_type = "joint";
+    goal_msg.goal.joint_values = joint_values;
+    goal_msg.goal.start_joint_values = {};
+    goal_msg.goal.config = config;
 
-    auto [success, trajectory] = plan(goal);
+    auto [success, trajectory] = plan(goal_msg);
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Joint Target.");
@@ -732,13 +750,13 @@ bool ManyMovePlanner::moveToNamedTarget(const std::string &target_name, const ma
         return true;
     }
 
-    manymove_planner::action::MoveManipulator::Goal goal;
-    goal.goal.movement_type = "named";
-    goal.goal.named_target = target_name;
-    goal.goal.start_joint_values = {};
-    goal.goal.config = config;
+    manymove_planner::action::MoveManipulator::Goal goal_msg;
+    goal_msg.goal.movement_type = "named";
+    goal_msg.goal.named_target = target_name;
+    goal_msg.goal.start_joint_values = {};
+    goal_msg.goal.config = config;
 
-    auto [success, trajectory] = plan(goal);
+    auto [success, trajectory] = plan(goal_msg);
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Named Target.");
@@ -774,13 +792,13 @@ bool ManyMovePlanner::moveCartesianPath(const geometry_msgs::msg::Pose &target_p
         return true;
     }
 
-    manymove_planner::action::MoveManipulator::Goal goal;
-    goal.goal.movement_type = "cartesian";
-    goal.goal.pose_target = target_pose;
-    goal.goal.start_joint_values = {};
-    goal.goal.config = config;
+    manymove_planner::action::MoveManipulator::Goal goal_msg;
+    goal_msg.goal.movement_type = "cartesian";
+    goal_msg.goal.pose_target = target_pose;
+    goal_msg.goal.start_joint_values = {};
+    goal_msg.goal.config = config;
 
-    auto [success, trajectory] = plan(goal);
+    auto [success, trajectory] = plan(goal_msg);
     if (!success)
     {
         RCLCPP_ERROR(logger_, "Planning failed for Cartesian Path.");

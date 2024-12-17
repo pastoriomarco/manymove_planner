@@ -43,13 +43,6 @@ public:
         const std::string &tcp_frame,
         const std::string &traj_controller);
 
-    // Check if at targets
-    bool isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose, double tolerance = 1e-2) const;
-    bool isAtJointTarget(const std::vector<double> &joint_values, double tolerance = 1e-2) const;
-    bool isAtNamedTarget(const std::string &target_name, double tolerance = 1e-2) const;
-    bool areSameJointTargets(const std::vector<double> &j1, const std::vector<double> &j2, double tolerance) const;
-    bool areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance) const;
-
     // Single movement commands
     bool moveToPoseTarget(const geometry_msgs::msg::Pose &target_pose, const manymove_planner::msg::MovementConfig &config);
     bool moveToJointTarget(const std::vector<double> &joint_values, const manymove_planner::msg::MovementConfig &config);
@@ -85,6 +78,13 @@ private:
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
     double computeMaxCartesianSpeed(const robot_trajectory::RobotTrajectoryPtr &trajectory) const;
     geometry_msgs::msg::Pose computeEndPoseFromJoints(const std::vector<double> &joint_values) const;
+
+    // Check if at targets
+    bool isAtPoseTarget(const geometry_msgs::msg::Pose &target_pose, double tolerance = 1e-2) const;
+    bool isAtJointTarget(const std::vector<double> &joint_values, double tolerance = 1e-2) const;
+    bool isAtNamedTarget(const std::string &target_name, double tolerance = 1e-2) const;
+    bool areSameJointTargets(const std::vector<double> &j1, const std::vector<double> &j2, double tolerance) const;
+    bool areSamePoses(const geometry_msgs::msg::Pose &p1, const geometry_msgs::msg::Pose &p2, double tolerance) const;
 
     std::vector<double> getNamedTargetJoints(const std::string &name);
     

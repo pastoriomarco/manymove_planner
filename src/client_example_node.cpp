@@ -105,13 +105,13 @@ private:
         manymove_planner::msg::MovementConfig max_move_config;
         max_move_config.velocity_scaling_factor = 1.0;
         max_move_config.acceleration_scaling_factor = 1.0;
-        max_move_config.step_size = 0.05;
+        max_move_config.step_size = 0.01;
         max_move_config.jump_threshold = 0.0;
         max_move_config.max_cartesian_speed = 0.5;
         max_move_config.max_exec_tries = 5;
         max_move_config.plan_number_target = 8;
         max_move_config.plan_number_limit = 32;
-        max_move_config.smoothing_type = "time_optimal";
+        max_move_config.smoothing_type = "ruckig";
 
         manymove_planner::msg::MovementConfig mid_move_config = max_move_config;
         mid_move_config.velocity_scaling_factor = max_move_config.velocity_scaling_factor / 2.0;
