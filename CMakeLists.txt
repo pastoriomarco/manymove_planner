@@ -39,6 +39,7 @@ add_library(manymove_planner_lib
   src/manymove_planner.cpp
 )
 
+# Link dependencies to the shared library
 ament_target_dependencies(manymove_planner_lib
   rclcpp
   moveit_core
@@ -47,7 +48,7 @@ ament_target_dependencies(manymove_planner_lib
   geometry_msgs
   moveit_visual_tools
   control_msgs
-  rosidl_default_runtime  # Included rosidl runtime dependencies
+  rosidl_default_runtime
 )
 
 # Link the generated typesupport library
@@ -124,9 +125,28 @@ install(TARGETS client_example_node
 
 
 #########################
+# Standalone MICPP Demo
+#########################
+add_executable(standalone_micpp_demo src/standalone_micpp_demo.cpp)
+ament_target_dependencies(standalone_micpp_demo
+  rclcpp
+  moveit_core
+  moveit_ros_planning_interface
+  tf2_geometry_msgs
+  geometry_msgs
+  moveit_visual_tools
+)
+# Link the generated typesupport library if needed
+target_link_libraries(standalone_micpp_demo ${cpp_typesupport_target})
+
+install(TARGETS standalone_micpp_demo
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+#########################
 # Install launch & config
 #########################
-install(DIRECTORY launch #config
+install(DIRECTORY launch config
   DESTINATION share/${PROJECT_NAME}
 )
 
