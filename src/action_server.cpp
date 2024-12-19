@@ -1,4 +1,4 @@
-#include "manymove_planner/manymove_planner.hpp"
+#include "manymove_planner/planner_interface.hpp"
 #include "manymove_planner/action/move_manipulator.hpp"
 #include "manymove_planner/action/move_manipulator_sequence.hpp"
 #include <rclcpp/rclcpp.hpp>
@@ -13,7 +13,7 @@ public:
     using GoalHandleMoveManipulatorSequence = rclcpp_action::ServerGoalHandle<MoveManipulatorSequence>;
 
     MoveManipulatorActionServer(const rclcpp::Node::SharedPtr &node,
-                                const std::shared_ptr<ManyMovePlanner> &planner)
+                                const std::shared_ptr<PlannerInterface> &planner)
         : node_(node), planner_(planner)
     {
         single_action_server_ = rclcpp_action::create_server<MoveManipulator>(
@@ -33,7 +33,7 @@ public:
 
 private:
     rclcpp::Node::SharedPtr node_;
-    std::shared_ptr<ManyMovePlanner> planner_;
+    std::shared_ptr<PlannerInterface> planner_;
 
     rclcpp_action::Server<MoveManipulator>::SharedPtr single_action_server_;
     rclcpp_action::Server<MoveManipulatorSequence>::SharedPtr sequence_action_server_;

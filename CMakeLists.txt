@@ -34,60 +34,73 @@ ament_export_dependencies(rosidl_default_runtime)
 
 include_directories(include)
 
-# Create the shared library
-add_library(manymove_planner_lib
-  src/manymove_planner.cpp
+##########################
+# MoveGroupPlanner Library
+##########################
+add_library(move_group_planner_lib
+  src/move_group_planner.cpp
 )
 
-# Link dependencies to the shared library
-ament_target_dependencies(manymove_planner_lib
+# Link dependencies for MoveGroupPlanner
+ament_target_dependencies(move_group_planner_lib
   rclcpp
   moveit_core
   moveit_ros_planning_interface
   tf2_geometry_msgs
   geometry_msgs
-  moveit_visual_tools
   control_msgs
   rosidl_default_runtime
 )
 
 # Link the generated typesupport library
-target_link_libraries(manymove_planner_lib ${cpp_typesupport_target})
+target_link_libraries(move_group_planner_lib ${cpp_typesupport_target})
 
+# Install MoveGroupPlanner library
 install(TARGETS
-  manymove_planner_lib
+  move_group_planner_lib
   DESTINATION lib
 )
 
-####################
-# Main example node
-####################
-add_executable(manymove_planner_node src/main.cpp)
-target_link_libraries(manymove_planner_node manymove_planner_lib)
-ament_target_dependencies(manymove_planner_node
+##########################
+# MoveItCppPlanner Library
+##########################
+add_library(moveit_cpp_planner_lib
+  src/moveit_cpp_planner.cpp
+)
+
+# Link dependencies for MoveItCppPlanner
+ament_target_dependencies(moveit_cpp_planner_lib
   rclcpp
   moveit_core
-  moveit_ros_planning_interface
   tf2_geometry_msgs
   geometry_msgs
-  moveit_visual_tools
-)
-# Link the generated typesupport library if needed
-target_link_libraries(manymove_planner_node ${cpp_typesupport_target})
-
-install(TARGETS manymove_planner_node
-  DESTINATION lib/${PROJECT_NAME}
+  control_msgs
+  rosidl_default_runtime
 )
 
+# Link the generated typesupport library
+target_link_libraries(moveit_cpp_planner_lib ${cpp_typesupport_target})
+
+# Install MoveItCppPlanner library
+install(TARGETS
+  moveit_cpp_planner_lib
+  DESTINATION lib
+)
 
 ###########################################
-# Move Action Server (Single Action)
+# Move Action Server (Single and Sequence)
 ###########################################
 add_executable(action_server_node
   src/action_server_node.cpp
   src/action_server.cpp
 )
-target_link_libraries(action_server_node manymove_planner_lib)
+
+# Link both planners to the action server
+target_link_libraries(action_server_node
+  move_group_planner_lib
+  moveit_cpp_planner_lib
+)
+
 ament_target_dependencies(action_server_node
   rclcpp
   rclcpp_action
@@ -95,16 +108,13 @@ ament_target_dependencies(action_server_node
   moveit_ros_planning_interface
   tf2_geometry_msgs
   geometry_msgs
-  moveit_visual_tools
   action_msgs
-  rosidl_default_runtime  # Ensure rosidl runtime is included
+  rosidl_default_runtime
 )
-target_link_libraries(action_server_node ${cpp_typesupport_target})
 
 install(TARGETS action_server_node
   DESTINATION lib/${PROJECT_NAME}
 )
-
 
 ############################
 # Move Client Example
@@ -115,14 +125,13 @@ ament_target_dependencies(client_example_node
   rclcpp_action
   geometry_msgs
   action_msgs
-  rosidl_default_runtime  # Ensure rosidl runtime is included
+  rosidl_default_runtime
 )
 target_link_libraries(client_example_node ${cpp_typesupport_target})
 
 install(TARGETS client_example_node
   DESTINATION lib/${PROJECT_NAME}
 )
-
 
 #########################
 # Standalone MICPP Demo
@@ -136,7 +145,6 @@ ament_target_dependencies(standalone_micpp_demo
   geometry_msgs
   moveit_visual_tools
 )
-# Link the generated typesupport library if needed
 target_link_libraries(standalone_micpp_demo ${cpp_typesupport_target})
 
 install(TARGETS standalone_micpp_demo
@@ -157,14 +165,13 @@ install(DIRECTORY include/
 #########################
 # Exporting
 #########################
-ament_export_libraries(manymove_planner_lib)
+ament_export_libraries(move_group_planner_lib moveit_cpp_planner_lib)
 ament_export_dependencies(
   rclcpp
   moveit_core
   moveit_ros_planning_interface
   tf2_geometry_msgs
   geometry_msgs
-  moveit_visual_tools
   action_msgs
   rclcpp_action
   rosidl_default_runtime

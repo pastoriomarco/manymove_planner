@@ -52,17 +52,17 @@ int main(int argc, char **argv)
 
     rclcpp::sleep_for(std::chrono::seconds(1));
 
-    moveit_msgs::msg::CollisionObject found_object;
-    bool test = planner.findCollisionObject("grasp", found_object);
+    // moveit_msgs::msg::CollisionObject found_object;
+    // bool test = planner.findCollisionObject("grasp", found_object);
 
-    if (test)
-    {
-        RCLCPP_INFO(node->get_logger(), "Grasp object found!");
-    }
-    else
-    {
-        RCLCPP_ERROR(node->get_logger(), "Grasp object NOT found!!!!");
-    }
+    // if (test)
+    // {
+    //     RCLCPP_INFO(node->get_logger(), "Grasp object found!");
+    // }
+    // else
+    // {
+    //     RCLCPP_ERROR(node->get_logger(), "Grasp object NOT found!!!!");
+    // }
 
     rclcpp::sleep_for(std::chrono::seconds(1));
 
@@ -75,54 +75,54 @@ int main(int argc, char **argv)
     target_pose.position.y = 0.0;
     target_pose.position.z = 0.2;
 
-    bool success = planner.moveToPoseTarget(target_pose, slow_move_config);
-    if (success)
-    {
-        RCLCPP_INFO(node->get_logger(), "Move to pose succeeded");
-    }
-    else
-    {
-        RCLCPP_ERROR(node->get_logger(), "Move to pose failed");
-    }
+    // bool success = planner.moveToPoseTarget(target_pose, slow_move_config);
+    // if (success)
+    // {
+    //     RCLCPP_INFO(node->get_logger(), "Move to pose succeeded");
+    // }
+    // else
+    // {
+    //     RCLCPP_ERROR(node->get_logger(), "Move to pose failed");
+    // }
 
-    // Joint targets
-    std::vector<double> rest_joint_values = {0.0, -0.785, 0.785, 0.0, 1.57, 0.0};
-    std::vector<double> scan_sx_joint_values = {-0.175, -0.419, 1.378, 0.349, 1.535, -0.977};
-    std::vector<double> scan_dx_joint_values = {0.733, -0.297, 1.378, -0.576, 1.692, 1.291};
+    // // Joint targets
+    // std::vector<double> rest_joint_values = {0.0, -0.785, 0.785, 0.0, 1.57, 0.0};
+    // std::vector<double> scan_sx_joint_values = {-0.175, -0.419, 1.378, 0.349, 1.535, -0.977};
+    // std::vector<double> scan_dx_joint_values = {0.733, -0.297, 1.378, -0.576, 1.692, 1.291};
 
-    bool result = false;
-    int counter = 0;
+    // bool result = false;
+    // int counter = 0;
 
-    // Move to joint target
-    do
-    {
-        result = planner.moveToJointTarget(rest_joint_values, mid_move_config);
-        counter++;
-    } while ((!result) && (counter < 16));
+    // // Move to joint target
+    // do
+    // {
+    //     result = planner.moveToJointTarget(rest_joint_values, mid_move_config);
+    //     counter++;
+    // } while ((!result) && (counter < 16));
 
-    // Move to joint target
-    counter = 0;
-    do
-    {
-        result = planner.moveToJointTarget(scan_sx_joint_values, max_move_config);
-        counter++;
-    } while ((!result) && (counter < 16));
+    // // Move to joint target
+    // counter = 0;
+    // do
+    // {
+    //     result = planner.moveToJointTarget(scan_sx_joint_values, max_move_config);
+    //     counter++;
+    // } while ((!result) && (counter < 16));
 
-    // Move to joint target
-    counter = 0;
-    do
-    {
-        result = planner.moveToJointTarget(scan_dx_joint_values, max_move_config);
-        counter++;
-    } while ((!result) && (counter < 16));
+    // // Move to joint target
+    // counter = 0;
+    // do
+    // {
+    //     result = planner.moveToJointTarget(scan_dx_joint_values, max_move_config);
+    //     counter++;
+    // } while ((!result) && (counter < 16));
 
-    // Move to joint target
-    counter = 0;
-    do
-    {
-        result = planner.moveToJointTarget(rest_joint_values, mid_move_config);
-        counter++;
-    } while ((!result) && (counter < 16));
+    // // Move to joint target
+    // counter = 0;
+    // do
+    // {
+    //     result = planner.moveToJointTarget(rest_joint_values, mid_move_config);
+    //     counter++;
+    // } while ((!result) && (counter < 16));
 
     // Shutdown and join the spinner thread
     rclcpp::shutdown();

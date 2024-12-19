@@ -1,5 +1,6 @@
 #include <rclcpp/rclcpp.hpp>
-#include "manymove_planner/manymove_planner.hpp"
+#include "manymove_planner/move_group_planner.hpp"
+#include "manymove_planner/moveit_cpp_planner.hpp"
 #include "action_server.cpp"
 
 int main(int argc, char** argv)
@@ -19,8 +20,11 @@ int main(int argc, char** argv)
     std::string traj_controller;
     node->get_parameter_or<std::string>("traj_controller", traj_controller, "lite6_traj_controller");
 
-    auto planner = std::make_shared<ManyMovePlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
+    auto planner = std::make_shared<MoveGroupPlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
     auto server = std::make_shared<MoveManipulatorActionServer>(node, planner);
+
+    // auto planner = std::make_shared<MoveItCppPlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
+    // auto server = std::make_shared<MoveManipulatorActionServer>(node, planner);
 
     rclcpp::executors::SingleThreadedExecutor executor;
     executor.add_node(node);
