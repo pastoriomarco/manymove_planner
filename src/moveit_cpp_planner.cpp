@@ -123,13 +123,10 @@ double MoveItCppPlanner::computeMaxCartesianSpeed(const robot_trajectory::RobotT
 }
 
 // Apply Time Parameterization
-bool MoveItCppPlanner::applyTimeParameterization(moveit_msgs::msg::RobotTrajectory &trajectory, const manymove_planner::msg::MovementConfig &config)
+bool MoveItCppPlanner::applyTimeParameterization(
+    robot_trajectory::RobotTrajectoryPtr &trajectory,
+    const manymove_planner::msg::MovementConfig &config)
 {
-    // Convert moveit_msgs::msg::RobotTrajectory to robot_trajectory::RobotTrajectory
-    auto robot_trajectory = std::make_shared<robot_trajectory::RobotTrajectory>(
-        moveit_cpp_ptr_->getRobotModel(), planning_components_->getPlanningGroupName());
-    robot_trajectory->setRobotTrajectoryMsg(*moveit_cpp_ptr_->getCurrentState(), trajectory);
-
     double velocity_scaling_factor = config.velocity_scaling_factor;
     double acceleration_scaling_factor = config.acceleration_scaling_factor;
 
@@ -137,43 +134,44 @@ bool MoveItCppPlanner::applyTimeParameterization(moveit_msgs::msg::RobotTrajecto
     for (int iteration = 0; iteration < max_iterations; iteration++)
     {
         // Reset durations
-        for (size_t i = 1; i < robot_trajectory->getWayPointCount(); i++)
-            robot_trajectory->setWayPointDurationFromPrevious(i, 0.0);
+        for (size_t i = 1; i < trajectory->getWayPointCount(); i++)
+            trajectory->setWayPointDurationFromPrevious(i, 0.0);
 
         bool time_param_success = false;
-
-        // Apply smoothing based on the specified type
         if (config.smoothing_type == "time_optimal")
         {
             trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
-            time_param_success = time_param.computeTimeStamps(*robot_trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
         else if (config.smoothing_type == "iterative" || config.smoothing_type == "iterative_parabolic")
         {
             trajectory_processing::IterativeSplineParameterization time_param;
-            time_param_success = time_param.computeTimeStamps(*robot_trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
         else if (config.smoothing_type == "ruckig")
         {
-            time_param_success = trajectory_processing::RuckigSmoothing::applySmoothing(*robot_trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            // Note: Ruckig smoothing requires calling applySmoothing on the trajectory directly
+            trajectory_processing::IterativeSplineParameterization time_param;
+            time_param_success = trajectory_processing::RuckigSmoothing::applySmoothing(
+                *trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
         else
         {
             // Default fallback
             trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
-            time_param_success = time_param.computeTimeStamps(*robot_trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
 
         if (!time_param_success)
         {
             RCLCPP_ERROR(logger_, "Failed to compute time stamps using '%s'", config.smoothing_type.c_str());
 
-            // Try fallback approach: time-optimal smoothing
-            for (size_t i = 1; i < robot_trajectory->getWayPointCount(); i++)
-                robot_trajectory->setWayPointDurationFromPrevious(i, 0.0);
+            // try fallback approach:
+            for (size_t i = 1; i < trajectory->getWayPointCount(); i++)
+                trajectory->setWayPointDurationFromPrevious(i, 0.0);
 
             trajectory_processing::TimeOptimalTrajectoryGeneration fallback_param;
-            time_param_success = fallback_param.computeTimeStamps(*robot_trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            time_param_success = fallback_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
 
             if (!time_param_success)
             {
@@ -182,17 +180,16 @@ bool MoveItCppPlanner::applyTimeParameterization(moveit_msgs::msg::RobotTrajecto
             }
         }
 
-        double max_speed = computeMaxCartesianSpeed(robot_trajectory);
+        double max_speed = computeMaxCartesianSpeed(trajectory);
         if (max_speed <= config.max_cartesian_speed)
         {
-            // Convert updated robot_trajectory back to moveit_msgs::msg::RobotTrajectory
-            trajectory = convertToMsg(*robot_trajectory);
-            return true; // Success
+            return true; // success
         }
         else
         {
             double scale = config.max_cartesian_speed / max_speed;
             velocity_scaling_factor *= scale;
+            // Adjust acceleration similarly (heuristic)
             acceleration_scaling_factor = (acceleration_scaling_factor * scale + acceleration_scaling_factor) / 2.0;
 
             if (velocity_scaling_factor < 0.01 || acceleration_scaling_factor < 0.01)
@@ -306,6 +303,13 @@ bool MoveItCppPlanner::areSameJointTargets(const std::vector<double> &j1, const 
     return true;
 }
 
+moveit_msgs::msg::RobotTrajectory MoveItCppPlanner::convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const
+{
+    moveit_msgs::msg::RobotTrajectory traj_msg;
+    trajectory.getRobotTrajectoryMsg(traj_msg);
+    return traj_msg;
+}
+
 std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const manymove_planner::action::MoveManipulator::Goal &goal_msg)
 {
     std::vector<std::pair<moveit_msgs::msg::RobotTrajectory, double>> trajectories;
@@ -323,11 +327,20 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
         planning_components_->setStartStateToCurrentState();
     }
 
+    // // Create PlanRequestParameters and set scaling factors
+    // moveit_cpp::PlanningComponent::PlanRequestParameters params;
+    // params.planning_pipeline = "ompl"; // or the name of your pipeline from your moveit_cpp.yaml
+    // params.max_velocity_scaling_factor = goal_msg.goal.config.velocity_scaling_factor;
+    // params.max_acceleration_scaling_factor = goal_msg.goal.config.acceleration_scaling_factor;
+    // // You can set other parameters in `params` as needed.
+
     // Set movement targets
     if ((goal_msg.goal.movement_type == "pose") || (goal_msg.goal.movement_type == "joint") || (goal_msg.goal.movement_type == "named"))
     {
         if (goal_msg.goal.movement_type == "pose")
         {
+
+            RCLCPP_INFO_STREAM(logger_, "Setting pose target for " << tcp_frame_);
             geometry_msgs::msg::PoseStamped target_pose;
             target_pose.pose = goal_msg.goal.pose_target;
             target_pose.header.frame_id = tcp_frame_;
@@ -335,16 +348,18 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
         }
         else if (goal_msg.goal.movement_type == "joint")
         {
+            RCLCPP_INFO_STREAM(logger_, "Setting joint target");
             moveit::core::RobotState goal_state(*moveit_cpp_ptr_->getCurrentState());
             goal_state.setJointGroupPositions(planning_components_->getPlanningGroupName(), goal_msg.goal.joint_values);
             planning_components_->setGoal(goal_state);
         }
         else if (goal_msg.goal.movement_type == "named")
         {
+            RCLCPP_INFO_STREAM(logger_, "Setting pose target for " << tcp_frame_);
             planning_components_->setGoal(goal_msg.goal.named_target);
         }
 
-        // Plan multiple trajectories
+        // Plan multiple trajectories using the plan(params) method
         int attempts = 0;
         while (attempts < goal_msg.goal.config.plan_number_limit &&
                static_cast<int>(trajectories.size()) < goal_msg.goal.config.plan_number_target)
@@ -367,7 +382,6 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
     }
     else if (goal_msg.goal.movement_type == "cartesian")
     {
-        // Cartesian movement
         std::vector<geometry_msgs::msg::Pose> waypoints;
         waypoints.push_back(goal_msg.goal.pose_target);
 
@@ -476,18 +490,26 @@ bool MoveItCppPlanner::executeTrajectoryWithFeedback(
     auto findClosestWaypoint = [&](const std::vector<trajectory_msgs::msg::JointTrajectoryPoint> &waypoints,
                                    const std::vector<double> &actual_positions) -> size_t
     {
+        // Define a search window around the last found index
+        // Start 2 points before the last found index, but not less than 0
         int start_search = static_cast<int>(last_found_index) - 2;
         if (start_search < 0)
             start_search = 0;
 
+        // End the search at last_found_index + 16 or the end of the waypoint list
         size_t end_search = std::min(last_found_index + 16, waypoints.size());
-        double tolerance = 1e-2;
+
+        double tolerance = 1e-2; // Increased tolerance from 1e-4 to 1e-2
         size_t best_idx = last_found_index;
         double min_distance = std::numeric_limits<double>::max();
 
-        for (size_t i = start_search; i < end_search; ++i)
+        // Search the defined window for the closest waypoint
+        for (size_t i = static_cast<size_t>(start_search); i < end_search; ++i)
         {
             double distance = computeDistance(actual_positions, waypoints[i].positions);
+
+            // Debugging: Log the distance for each waypoint in the search window
+            RCLCPP_DEBUG(logger_, "Waypoint %zu distance: %.6f", i, distance);
 
             if (distance < min_distance)
             {
@@ -495,20 +517,30 @@ bool MoveItCppPlanner::executeTrajectoryWithFeedback(
                 best_idx = i;
             }
 
+            // If within tolerance, prioritize this waypoint
             if (distance <= tolerance)
             {
-                break;
+                best_idx = i;
+                min_distance = distance;
+                break; // Exit early if within tolerance
             }
         }
 
+        // Update last_found_index to the best found index if it has advanced
         if (best_idx > last_found_index)
         {
+            RCLCPP_DEBUG(logger_, "Updating last_found_index from %zu to %zu", last_found_index, best_idx);
             last_found_index = best_idx;
         }
         else if (best_idx == last_found_index && last_found_index < waypoints.size() - 1)
         {
+            // If best_idx hasn't advanced and it's not at the end, try to increment it
             last_found_index = std::min(last_found_index + 1, waypoints.size() - 1);
+            RCLCPP_DEBUG(logger_, "Incrementing last_found_index to %zu", last_found_index);
         }
+
+        // Debugging: Log the selected closest index and its distance
+        RCLCPP_DEBUG(logger_, "Selected closest_idx: %zu with distance: %.6f", best_idx, min_distance);
 
         return best_idx;
     };
@@ -607,7 +639,6 @@ bool MoveItCppPlanner::executeTrajectoryWithFeedback(
     }
 }
 
-
 std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::applyTimeParametrizationSequence(
     const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,
     const std::vector<manymove_planner::msg::MovementConfig> &configs,
@@ -632,36 +663,53 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::applyTimePa
         const auto &traj = trajectories[i];
         const auto &conf = configs[i];
 
+        // Convert to RobotTrajectory
         auto robot_traj_ptr = std::make_shared<robot_trajectory::RobotTrajectory>(
             moveit_cpp_ptr_->getRobotModel(), planning_components_->getPlanningGroupName());
         robot_traj_ptr->setRobotTrajectoryMsg(*moveit_cpp_ptr_->getCurrentState(), traj);
 
-        moveit_msgs::msg::RobotTrajectory converted_traj = convertToMsg(*robot_traj_ptr);
-
-        if (!applyTimeParameterization(converted_traj, conf))
+        // Apply time parameterization directly on robot_traj_ptr
+        if (!applyTimeParameterization(robot_traj_ptr, conf))
         {
             RCLCPP_ERROR(logger_, "Time parameterization failed for segment %zu", i + 1);
             return {false, moveit_msgs::msg::RobotTrajectory()};
         }
 
-        // Remove duplicate points
-        if (!concatenated.joint_trajectory.points.empty() && !converted_traj.joint_trajectory.points.empty())
+        // Convert back to msg
+        moveit_msgs::msg::RobotTrajectory segment;
+        robot_traj_ptr->getRobotTrajectoryMsg(segment);
+
+        // Remove the first point of the segment if it's identical to the last point of the concatenated trajectory
+        if (!concatenated.joint_trajectory.points.empty() && !segment.joint_trajectory.points.empty())
         {
             const auto &prev_last = concatenated.joint_trajectory.points.back().positions;
-            const auto &current_first = converted_traj.joint_trajectory.points.front().positions;
+            const auto &current_first = segment.joint_trajectory.points.front().positions;
 
-            bool identical = std::equal(prev_last.begin(), prev_last.end(), current_first.begin(), current_first.end(),
-                                        [](double a, double b)
-                                        { return std::abs(a - b) < 1e-6; });
+            bool identical = true;
+            if (prev_last.size() == current_first.size())
+            {
+                for (size_t idx = 0; idx < prev_last.size(); ++idx)
+                {
+                    if (std::abs(prev_last[idx] - current_first[idx]) > 1e-6)
+                    {
+                        identical = false;
+                        break;
+                    }
+                }
+            }
+            else
+            {
+                identical = false;
+            }
 
             if (identical)
             {
-                converted_traj.joint_trajectory.points.erase(converted_traj.joint_trajectory.points.begin());
+                segment.joint_trajectory.points.erase(segment.joint_trajectory.points.begin());
             }
         }
 
-        // Offset time_from_start
-        for (auto &point : converted_traj.joint_trajectory.points)
+        // Offset the time_from_start for each point in the segment
+        for (auto &point : segment.joint_trajectory.points)
         {
             double original_time = point.time_from_start.sec + point.time_from_start.nanosec * 1e-9;
             double new_time = original_time + cumulative_time;
@@ -669,17 +717,19 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::applyTimePa
             point.time_from_start.nanosec = static_cast<int>((new_time - static_cast<int>(new_time)) * 1e9);
         }
 
-        if (!converted_traj.joint_trajectory.points.empty())
+        // Update cumulative_time based on the last point of the segment
+        if (!segment.joint_trajectory.points.empty())
         {
-            const auto &last_point = converted_traj.joint_trajectory.points.back();
+            const auto &last_point = segment.joint_trajectory.points.back();
             cumulative_time = last_point.time_from_start.sec + last_point.time_from_start.nanosec * 1e-9;
         }
 
-        size_t added_size = converted_traj.joint_trajectory.points.size();
+        // Append the segment to the concatenated trajectory
+        size_t added_size = segment.joint_trajectory.points.size();
         concatenated.joint_trajectory.points.insert(
             concatenated.joint_trajectory.points.end(),
-            converted_traj.joint_trajectory.points.begin(),
-            converted_traj.joint_trajectory.points.end());
+            segment.joint_trajectory.points.begin(),
+            segment.joint_trajectory.points.end());
 
         sizes.push_back(added_size);
     }
@@ -694,15 +744,13 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
     std::vector<moveit_msgs::msg::RobotTrajectory> planned_trajectories;
     std::vector<manymove_planner::msg::MovementConfig> planned_configs;
 
-    // Initialize previous end joint targets
-    std::vector<double> previous_end_joint_targets;
-
     if (sequence_goal.goals.empty())
     {
         RCLCPP_WARN(logger_, "planSequence called with an empty goals vector.");
         return {planned_trajectories, planned_configs};
     }
 
+    std::vector<double> previous_end_joint_targets;
     const double pose_tolerance = 1e-3; // Define a suitable tolerance
 
     for (size_t i = 0; i < sequence_goal.goals.size(); ++i)
@@ -721,16 +769,16 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
             }
             else
             {
+                auto current_state = moveit_cpp_ptr_->getCurrentState();
                 previous_end_joint_targets = std::vector<double>(
-                    moveit_cpp_ptr_->getCurrentState()->getVariablePositions(),
-                    moveit_cpp_ptr_->getCurrentState()->getVariablePositions() + moveit_cpp_ptr_->getCurrentState()->getVariableCount());
+                    current_state->getVariablePositions(),
+                    current_state->getVariablePositions() + current_state->getVariableCount());
 
                 RCLCPP_INFO(logger_, "Initialized previous_end_joint_targets from the current robot pose.");
             }
         }
         else
         {
-            // Use the last planned trajectory's end state as the starting state
             previous_end_joint_targets = planned_trajectories.back().joint_trajectory.points.back().positions;
         }
 
@@ -745,14 +793,14 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
             return {{}, {}};
         }
 
-        // Skip if the new trajectory's end is too close to the previous end
-        if (areSameJointTargets(trajectory.joint_trajectory.points.back().positions, previous_end_joint_targets, pose_tolerance))
+        // Check if the trajectory is too small to be meaningful
+        if (!trajectory.joint_trajectory.points.empty() &&
+            areSameJointTargets(trajectory.joint_trajectory.points.back().positions, previous_end_joint_targets, pose_tolerance))
         {
             RCLCPP_WARN(logger_, "Resulting trajectory too small for move %zu, skipping.", i + 1);
         }
         else
         {
-            // Add the planned trajectory and its config to the result
             planned_trajectories.push_back(trajectory);
             planned_configs.push_back(modified_goal.goal.config);
         }
@@ -760,12 +808,4 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
 
     RCLCPP_INFO(logger_, "Successfully planned sequence with %zu steps.", planned_trajectories.size());
     return {planned_trajectories, planned_configs};
-}
-
-// Helper method to convert RobotTrajectory to moveit_msgs::msg::RobotTrajectory
-moveit_msgs::msg::RobotTrajectory MoveItCppPlanner::convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const
-{
-    moveit_msgs::msg::RobotTrajectory traj_msg;
-    trajectory.getRobotTrajectoryMsg(traj_msg);
-    return traj_msg;
 }

@@ -24,7 +24,7 @@ def generate_launch_description():
             geometry_mesh_filename="pneumatic_lite.stl",
             geometry_mesh_tcp_xyz="0.03075 0 0.11885",
             geometry_mesh_tcp_rpy="0 0.52 0",
-            kinematics_suffix="LS1"
+            #kinematics_suffix="LS1"
         )
         .robot_description()
         .trajectory_execution(file_path="config/lite6/fake_controllers.yaml")

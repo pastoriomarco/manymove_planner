@@ -72,7 +72,7 @@ private:
 
     bool areSameJointTargets(const std::vector<double> &j1, const std::vector<double> &j2, double tolerance) const;
 
-    bool applyTimeParameterization(moveit_msgs::msg::RobotTrajectory &trajectory, const manymove_planner::msg::MovementConfig &config);
+    bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
 
     // Helper method to convert RobotTrajectory to moveit_msgs::msg::RobotTrajectory
     moveit_msgs::msg::RobotTrajectory convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const;

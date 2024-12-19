@@ -142,6 +142,7 @@ private:
         const auto &goals_msg = goal_handle->get_goal();
 
         // Plan the sequence
+        RCLCPP_INFO(node_->get_logger(), "Planning Sequence");
         auto [trajectories, configs] = planner_->planSequence(*goals_msg);
 
         if (trajectories.empty())
