@@ -121,6 +121,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             moveit_configs.to_dict(),
             {
+                'planner_type': 'movegroup',
                 'velocity_scaling_factor': velocity_scaling_factor,
                 'acceleration_scaling_factor': acceleration_scaling_factor,
                 'max_exec_retries': max_exec_retries,
@@ -146,7 +147,7 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
-        # Existing DeclareLaunchArguments
+        DeclareLaunchArgument('planner_type', default_value='movegroup', description='Type of planner to use: moveitcpp or movegroup'),
         DeclareLaunchArgument('velocity_scaling_factor', default_value='0.5', description='Velocity scaling factor'),
         DeclareLaunchArgument('acceleration_scaling_factor', default_value='0.5', description='Acceleration scaling factor'),
         DeclareLaunchArgument('max_exec_retries', default_value='5', description='Maximum number of retries'),

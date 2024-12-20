@@ -111,7 +111,7 @@ private:
         max_move_config.max_exec_tries = 5;
         max_move_config.plan_number_target = 8;
         max_move_config.plan_number_limit = 32;
-        max_move_config.smoothing_type = "ruckig";
+        max_move_config.smoothing_type = "time_optimal";
 
         manymove_planner::msg::MovementConfig mid_move_config = max_move_config;
         mid_move_config.velocity_scaling_factor = max_move_config.velocity_scaling_factor / 2.0;
@@ -149,6 +149,13 @@ private:
         joint_scan_dx.joint_values = scan_dx_joint_values;
         moves.push_back(joint_scan_dx);
 
+        // Named move
+        MoveManipulatorGoalMsg named_home;
+        named_home.movement_type = "named";
+        named_home.named_target = "home";
+        named_home.config = mid_move_config;
+        moves.push_back(named_home);
+
         // Pose move
         MoveManipulatorGoalMsg pose_test;
         pose_test.movement_type = "pose";
@@ -167,13 +174,6 @@ private:
         pose_test.pose_target.position.z -= 0.1;
         pose_test.config = slow_move_config;
         moves.push_back(pose_test);
-
-        // Named move
-        MoveManipulatorGoalMsg named_home;
-        named_home.movement_type = "named";
-        named_home.named_target = "home";
-        named_home.config = mid_move_config;
-        moves.push_back(named_home);
 
         // Repeating initial move to get back to start:
         moves.push_back(joint_rest);

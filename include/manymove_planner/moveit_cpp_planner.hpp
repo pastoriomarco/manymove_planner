@@ -49,22 +49,22 @@ public:
     ~MoveItCppPlanner() override = default;
 
     // Planning methods
-    std::pair<bool, moveit_msgs::msg::RobotTrajectory> plan(const manymove_planner::action::MoveManipulator::Goal &goal) override ;
+    std::pair<bool, moveit_msgs::msg::RobotTrajectory> plan(const manymove_planner::action::MoveManipulator::Goal &goal) override;
     std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
-        const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal) override ;
+        const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal) override;
 
     // Execution methods
-    bool executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory) override ;
+    bool executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory) override;
     bool executeTrajectoryWithFeedback(
         const moveit_msgs::msg::RobotTrajectory &trajectory,
         const std::vector<size_t> &sizes,
-        const std::shared_ptr<rclcpp_action::ServerGoalHandle<manymove_planner::action::MoveManipulatorSequence>> &goal_handle) override ;
+        const std::shared_ptr<rclcpp_action::ServerGoalHandle<manymove_planner::action::MoveManipulatorSequence>> &goal_handle) override;
 
     // Time parametrization
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
         const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,
         const std::vector<manymove_planner::msg::MovementConfig> &configs,
-        std::vector<size_t> &sizes) override ;
+        std::vector<size_t> &sizes) override;
 
 private:
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
@@ -79,6 +79,7 @@ private:
 
     rclcpp::Node::SharedPtr node_;
     rclcpp::Logger logger_;
+    std::string planning_group_;
     std::string base_frame_;
     std::string tcp_frame_;
     std::string traj_controller_;
@@ -88,6 +89,3 @@ private:
 
     rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr follow_joint_traj_client_;
 };
-
-
-

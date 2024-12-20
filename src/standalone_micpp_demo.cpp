@@ -421,8 +421,7 @@ int main(int argc, char **argv)
     waypoints.push_back(waypoint2);
 
     // Retrieve joint_model_group and link_model
-    auto joint_model_group = moveit_cpp_ptr->getRobotModel()->getJointModelGroup("lite6");
-    auto link_model = joint_model_group->getLinkModel("link_tcp");
+    auto link_model = joint_model_group_ptr->getLinkModel("link_tcp");
 
     // Prepare a vector of RobotStatePtr for the resulting trajectory states
     std::vector<moveit::core::RobotStatePtr> trajectory_states;
@@ -431,7 +430,7 @@ int main(int argc, char **argv)
     // Compute Cartesian path using the correct signature
     double fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
         wp_start_state.get(),                         // Pass the raw pointer
-        joint_model_group,                            // Joint model group
+        joint_model_group_ptr,                        // Joint model group
         trajectory_states,                            // Resulting trajectory states
         link_model,                                   // Link to control
         waypoints,                                    // Waypoints for Cartesian motion
@@ -449,7 +448,7 @@ int main(int argc, char **argv)
         RCLCPP_INFO(LOGGER, "Successfully computed Cartesian path. Executing...");
 
         // Build a RobotTrajectory from the computed states
-        robot_trajectory::RobotTrajectory trajectory(moveit_cpp_ptr->getRobotModel(), "lite6");
+        robot_trajectory::RobotTrajectory trajectory(moveit_cpp_ptr->getRobotModel(), PLANNING_GROUP);
         double dt = 0.1; // time interval between waypoints
         for (const auto &rs : trajectory_states)
         {
@@ -457,12 +456,12 @@ int main(int argc, char **argv)
         }
 
         // Visualize the trajectory
-        visual_tools.publishTrajectoryLine(std::make_shared<robot_trajectory::RobotTrajectory>(trajectory), joint_model_group);
+        visual_tools.publishTrajectoryLine(std::make_shared<robot_trajectory::RobotTrajectory>(trajectory), joint_model_group_ptr);
         visual_tools.trigger();
 
         // Execute the trajectory
         auto trajectory_ptr = std::make_shared<robot_trajectory::RobotTrajectory>(trajectory);
-        moveit_cpp_ptr->execute("lite6", trajectory_ptr);
+        moveit_cpp_ptr->execute(PLANNING_GROUP, trajectory_ptr);
     }
     else
     {

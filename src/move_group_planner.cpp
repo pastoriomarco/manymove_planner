@@ -107,7 +107,7 @@ bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajecto
     double velocity_scaling_factor = config.velocity_scaling_factor;
     double acceleration_scaling_factor = config.acceleration_scaling_factor;
 
-    const int max_iterations = 5;
+    const int max_iterations = 32;
     for (int iteration = 0; iteration < max_iterations; iteration++)
     {
         // Reset durations
