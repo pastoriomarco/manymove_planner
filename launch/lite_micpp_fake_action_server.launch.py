@@ -94,7 +94,7 @@ def generate_launch_description():
         parameters=[moveit_config.robot_description],
     )
 
-    # ros2_control using FakeSystem as hardware
+    # ros2_control
     ros2_controllers_path = os.path.join(
         get_package_share_directory("xarm_controller"),
         "config",
