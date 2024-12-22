@@ -16,7 +16,7 @@ def generate_launch_description():
             controllers_name="fake_controllers",
             ros2_control_plugin="uf_robot_hardware/UFRobotFakeSystemHardware",
             context=LaunchContext(),
-            robot_type="lite",
+            robot_type="uf850",
             dof=6, 
             add_realsense_d435i=True, 
             add_d435i_links=True,
@@ -29,7 +29,7 @@ def generate_launch_description():
             #kinematics_suffix="LS1"
         )
         .robot_description()
-        .trajectory_execution(file_path="config/lite6/fake_controllers.yaml")
+        .trajectory_execution(file_path="config/uf850/fake_controllers.yaml")
         .planning_scene_monitor(publish_robot_description=True, publish_robot_description_semantic=True)
         .planning_pipelines(pipelines=["ompl"])
         .moveit_cpp(file_path=get_package_share_directory("manymove_planner") + "/config/moveit_cpp.yaml")
@@ -42,7 +42,23 @@ def generate_launch_description():
         output="screen",
         parameters=[
             moveit_config.to_dict(),
-            {"planner_type": "moveitcpp"}  
+            {
+                "planner_type": "moveitcpp",
+                'velocity_scaling_factor': 0.5,
+                'acceleration_scaling_factor': 0.5,
+                'max_exec_retries': 5,
+                'smoothing_type': "traj_optimal",
+                'step_size': 0.01,
+                'jump_threshold': 0.0,
+                'max_cartesian_speed': 0.5,
+                'plan_number_target': 8,
+                'plan_number_limit': 12,
+                
+                'planning_group': "uf850",
+                'base_frame': "link_base",
+                'tcp_frame': "link_tcp",
+                'traj_controller': "uf850_traj_controller",
+            }
         ],
         arguments=["--log-level", "debug"],
     )
@@ -89,7 +105,7 @@ def generate_launch_description():
     ros2_controllers_path = os.path.join(
         get_package_share_directory("xarm_controller"),
         "config",
-        "lite6_controllers.yaml",
+        "uf850_controllers.yaml",
     )
 
 
@@ -116,7 +132,7 @@ def generate_launch_description():
     arm_controller_spawner = Node(
         package="controller_manager",
         executable="spawner",
-        arguments=["lite6_traj_controller", "-c", "/controller_manager"],
+        arguments=["uf850_traj_controller", "-c", "/controller_manager"],
     )
 
     return LaunchDescription(

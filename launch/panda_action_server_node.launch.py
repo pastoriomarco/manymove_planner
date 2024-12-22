@@ -56,6 +56,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             moveit_configs.to_dict(),
             {
+                "planner_type": "movegroup",
                 'velocity_scaling_factor': velocity_scaling_factor,
                 'acceleration_scaling_factor': acceleration_scaling_factor,
                 'max_exec_retries': max_exec_retries,
@@ -81,7 +82,7 @@ def launch_setup(context, *args, **kwargs):
 
 def generate_launch_description():
     return LaunchDescription([
-        # Existing DeclareLaunchArguments
+        # DeclareLaunchArguments for movements defaults
         DeclareLaunchArgument('velocity_scaling_factor', default_value='0.5', description='Velocity scaling factor'),
         DeclareLaunchArgument('acceleration_scaling_factor', default_value='0.5', description='Acceleration scaling factor'),
         DeclareLaunchArgument('max_exec_retries', default_value='5', description='Maximum number of retries'),
@@ -92,10 +93,10 @@ def generate_launch_description():
         DeclareLaunchArgument('plan_number_target', default_value='12', description='Plan number target'),
         DeclareLaunchArgument('plan_number_limit', default_value='32', description='Plan number limit'),
         
-        # New DeclareLaunchArguments for planning_group, base_frame, tcp_frame
+        # DeclareLaunchArguments for planning_group, base_frame, tcp_frame
         DeclareLaunchArgument('planning_group', default_value='panda_arm', description='MoveIt planning group'),
         DeclareLaunchArgument('base_frame', default_value='panda_link0', description='Base frame of the robot'),
-        DeclareLaunchArgument('tcp_frame', default_value='panda_link6', description='TCP (end effector) frame of the robot' ),
+        DeclareLaunchArgument('tcp_frame', default_value='panda_link8', description='TCP (end effector) frame of the robot' ),
         DeclareLaunchArgument('traj_controller', default_value='panda_arm_controller', description='traj_controller action server name of the robot' ),
 
         # OpaqueFunction to set up the node

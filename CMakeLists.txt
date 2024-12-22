@@ -117,19 +117,47 @@ install(TARGETS action_server_node
 )
 
 ############################
-# Move Client Example
+# Move Client Examples
 ############################
-add_executable(client_example_node src/client_example_node.cpp)
-ament_target_dependencies(client_example_node
+add_executable(client_example_node_lite src/client_example_node_lite.cpp)
+ament_target_dependencies(client_example_node_lite
   rclcpp
   rclcpp_action
   geometry_msgs
   action_msgs
   rosidl_default_runtime
 )
-target_link_libraries(client_example_node ${cpp_typesupport_target})
+target_link_libraries(client_example_node_lite ${cpp_typesupport_target})
 
-install(TARGETS client_example_node
+install(TARGETS client_example_node_lite
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(client_example_node_uf850 src/client_example_node_uf850.cpp)
+ament_target_dependencies(client_example_node_uf850
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  action_msgs
+  rosidl_default_runtime
+)
+target_link_libraries(client_example_node_uf850 ${cpp_typesupport_target})
+
+install(TARGETS client_example_node_uf850
+  DESTINATION lib/${PROJECT_NAME}
+)
+
+add_executable(client_example_node_panda src/client_example_node_panda.cpp)
+ament_target_dependencies(client_example_node_panda
+  rclcpp
+  rclcpp_action
+  geometry_msgs
+  action_msgs
+  rosidl_default_runtime
+)
+target_link_libraries(client_example_node_panda ${cpp_typesupport_target})
+
+install(TARGETS client_example_node_panda
   DESTINATION lib/${PROJECT_NAME}
 )
 
