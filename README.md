@@ -33,35 +33,41 @@ The `manymove_planner` project provides a robust framework for planning and exec
 ### **Messages**
 
 #### **MovementConfig.msg**
-Defines the configuration parameters for robotic movements, to be defined for each move of a sequence.
+Defines the configuration parameters for robotic movements:
 
+**Planning parameters for all movements:**
+- `velocity_scaling_factor`: Factor to scale the velocity (0.0 - 1.0), set on planner parameters, potentially modified by `manymove_planner` functions.
+- `acceleration_scaling_factor`: Factor to scale the acceleration (0.0 - 1.0), set on planner parameters, potentially modified by `manymove_planner` functions.
+- `max_cartesian_speed`: Maximum speed for Cartesian movements (m/s), enforced by `manymove_planner` functions.
+- `smoothing_type`: Type of trajectory smoothing (e.g., time-optimal, spline), configured for `manymove_planner` functions.
 
-Planning params for all movements:
-- `max_cartesian_speed`: Maximum speed for Cartesian movements (m/s), enforced by manymove_planner functions.
-- `smoothing_type`: Type of trajectory smoothing (e.g., time-optimal, spline), set for manymove_planner functions.
-- `velocity_scaling_factor`: Factor to scale the velocity (0.0 - 1.0), set on planners params, may be modified by manymove_planners functions.
-- `acceleration_scaling_factor`: Factor to scale the acceleration (0.0 - 1.0), set on planners params, may be modified by manymove_planners functions.
-Planning params only for cartesian/linear movements:
+**Planning parameters only for Cartesian/linear movements:**
 - `step_size`: Step size for Cartesian planning.
 - `jump_threshold`: Threshold to avoid jumps in Cartesian paths.
-Planning params to try and optimize path length by repeating planning for the same move:
+
+**Planning parameters for optimizing path length with repeated planning attempts:**
 - `plan_number_target`: Target number of plans for sampling-based planners.
 - `plan_number_limit`: Limit on the number of plans for sampling-based planners.
-Execution parameters:
+
+**Execution parameters:**
 - `max_exec_tries`: Maximum execution attempts for retrying plans.
 
 #### **MoveManipulatorGoal.msg**
 Represents a single goal for manipulator movement:
-IMPORTANT:Only one kind of movement is taken into consideration for any move, and it is determined by the movement_type variable.
-All other movements won't be considered if they have a If the relative move is not correctly 
+
+**IMPORTANT:** Only one type of movement is considered for each move, determined by the `movement_type` variable. If other movement fields are specified, they will be ignored unless correctly aligned with `movement_type`.
+
 - `movement_type`: Type of movement (`pose`, `joint`, `named`, or `cartesian`).
-- `pose_target`: Desired pose for the manipulator in either for 'pose' or 'cartesian' move.
-- `named_target`: Predefined named target position for 'name' joint move.
-- `joint_values`: Specific joint values for the manipulator, for 'joint' move.
-IMPORTANT: start_joint_values is to be specified only to plan a trajectory that don't start from the current position of the robot, to plan before the robot get there.
-If a plan that were planned with start_joint_values is executed from another start position the execution will fail.
-- `start_joint_values`: Starting joint configuration.
+- `pose_target`: Desired pose for the manipulator, used for `pose` or `cartesian` moves.
+- `named_target`: Predefined named target position, used for `named` joint moves.
+- `joint_values`: Specific joint values for the manipulator, used for `joint` moves.
+
+**IMPORTANT:**
+`start_joint_values` should be specified only if planning a trajectory that does not start from the current robot position. If a trajectory planned with `start_joint_values` is executed from a different start position, the execution will fail.
+
+- `start_joint_values`: Starting joint configuration for non-default planning.
 - `config`: Configuration parameters for movement, defined in `MovementConfig`.
+
 
 ### **Actions**
 
