@@ -16,7 +16,19 @@ MoveItCppPlanner::MoveItCppPlanner(
     moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
 
     planning_components_ = std::make_shared<moveit_cpp::PlanningComponent>(planning_group, moveit_cpp_ptr_);
+    RCLCPP_INFO(logger_, "===================================================");
     RCLCPP_INFO(logger_, "MoveItCppPlanner initialized with group: %s", planning_group.c_str());
+
+    plan_parameters_.load(node_);
+
+    RCLCPP_INFO(logger_, "===================================================");
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.max_acceleration_scaling_factor: " << plan_parameters_.max_acceleration_scaling_factor);
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.max_velocity_scaling_factor: " << plan_parameters_.max_velocity_scaling_factor);
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.planner_id: " << plan_parameters_.planner_id);
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.planning_attempts: " << plan_parameters_.planning_attempts);
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.planning_pipeline: " << plan_parameters_.planning_pipeline);
+    RCLCPP_INFO_STREAM(logger_, "plan_parameters_.planning_time: " << plan_parameters_.planning_time);
+    RCLCPP_INFO(logger_, "===================================================");
 
     // Initialize FollowJointTrajectory action client
     follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/" + traj_controller_ + "/follow_joint_trajectory");
@@ -409,7 +421,7 @@ bool MoveItCppPlanner::applyTimeParameterization(
         }
         else
         {
-            // Default fallback
+            // Default fallback to time_optimal
             trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
             time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
@@ -419,6 +431,7 @@ bool MoveItCppPlanner::applyTimeParameterization(
             RCLCPP_ERROR(logger_, "Failed to compute time stamps using '%s'", config.smoothing_type.c_str());
 
             // try fallback approach:
+            RCLCPP_WARN(logger_, "Fallback to time-optimal smoothing...");
             for (size_t i = 1; i < trajectory->getWayPointCount(); i++)
                 trajectory->setWayPointDurationFromPrevious(i, 0.0);
 

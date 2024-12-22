@@ -30,16 +30,16 @@ int main(int argc, char **argv)
     if (planner_type == "moveitcpp")
     {
         planner = std::make_shared<MoveItCppPlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
-        RCLCPP_INFO(node->get_logger(), "=======================");
+        RCLCPP_INFO(node->get_logger(), "===================================================");
         RCLCPP_INFO(node->get_logger(), "Using MoveItCppPlanner.");
-        RCLCPP_INFO(node->get_logger(), "=======================");
+        RCLCPP_INFO(node->get_logger(), "===================================================");
     }
     else if (planner_type == "movegroup")
     {
         planner = std::make_shared<MoveGroupPlanner>(node, planning_group, base_frame, tcp_frame, traj_controller);
-        RCLCPP_INFO(node->get_logger(), "=======================");
+        RCLCPP_INFO(node->get_logger(), "===================================================");
         RCLCPP_INFO(node->get_logger(), "Using MoveGroupPlanner.");
-        RCLCPP_INFO(node->get_logger(), "=======================");
+        RCLCPP_INFO(node->get_logger(), "===================================================");
     }
     else
     {

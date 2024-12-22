@@ -86,6 +86,7 @@ private:
 
     std::shared_ptr<moveit_cpp::MoveItCpp> moveit_cpp_ptr_;
     std::shared_ptr<moveit_cpp::PlanningComponent> planning_components_;
+    moveit_cpp::PlanningComponent::PlanRequestParameters plan_parameters_;
 
     rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr follow_joint_traj_client_;
 };
