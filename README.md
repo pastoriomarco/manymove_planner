@@ -1,35 +1,47 @@
 # ManyMove Planner
 
-The `manymove_planner` project is designed to provide a robust and flexible framework for planning and executing robotic manipulator movements using ROS 2 and MoveIt 2. It supports various robots, including the UF850, Panda, and Lite series, with advanced configuration options to cater to diverse operational requirements.
+The `manymove_planner` project provides a robust framework for planning and executing robotic manipulator movements using ROS 2 and MoveIt 2. It supports diverse robots, including the UF850, Panda, and Lite series, with modular, configurable components that cater to various motion planning and execution needs.
 
 ## Features
 
-- Action server for single and sequential manipulator movement goals.
-- Integration with MoveIt 2 for motion planning and control.
-- Configurable launch files for different robot platforms.
-- Support for advanced planning parameters like velocity scaling, acceleration limits, and Cartesian motion constraints.
+- **Action-Based Motion Control**:
+  - Single move goals with position or Cartesian targets.
+  - Sequential move goals for executing a series of movements.
+- **Integration with MoveIt 2**:
+  - Supports motion planning, Cartesian path planning, and time parameterization.
+- **Flexible Planner Options**:
+  - Choose between MoveItCppPlanner and MoveGroupPlanner for motion planning.
+- **Customizable Parameters**:
+  - Control velocity, acceleration, Cartesian motion constraints, and more via ROS parameters or launch files.
+
+## Architecture Overview
+
+1. **Planner Interface**:
+   - Defines abstract methods for planning, execution, and time parameterization.
+   - Implemented by `MoveItCppPlanner` and `MoveGroupPlanner`.
+2. **Action Server**:
+   - Handles incoming motion requests and delegates tasks to the chosen planner.
+   - Provides feedback and manages action lifecycle.
+3. **Action Server Node**:
+   - Configures and initializes the appropriate planner and action server.
+   - Supports runtime parameter configuration.
+4. **Client Node**:
+   - Demonstrates sending single and sequence motion goals.
 
 ## Requirements
 
 - ROS 2 (Foxy or later)
 - MoveIt 2
 - Required ROS 2 dependencies:
-  - `rclcpp`
-  - `moveit_core`
-  - `moveit_ros_planning_interface`
-  - `geometry_msgs`
-  - `action_msgs`
-  - `control_msgs`
-  - `rosidl_default_generators`
-  - `rosidl_default_runtime`
+  - `rclcpp`, `moveit_core`, `geometry_msgs`, `action_msgs`, `control_msgs`, `rosidl_default_generators`
 
 ## Installation
 
 ### Dependencies
-Ensure that you have the required ROS 2 and MoveIt 2 packages installed. Refer to the ROS 2 and MoveIt 2 installation guides for your platform.
+Ensure ROS 2 and MoveIt 2 are installed. Follow the [MoveIt 2 installation guide](https://moveit.ros.org/install/) for your platform.
 
 ### Build Instructions
-1. Clone the repository into your ROS 2 workspace:
+1. Clone the repository into your workspace:
    ```bash
    cd ~/ros2_ws/src
    git clone <repository_url> manymove_planner
@@ -48,135 +60,102 @@ Ensure that you have the required ROS 2 and MoveIt 2 packages installed. Refer t
 
 ## Usage
 
-### Launching the Nodes
-The project provides several launch files for different robot configurations:
+### Launching the Action Server
 
-- **UF850 Manipulator**
+- **UF850 Manipulator**:
   ```bash
   ros2 launch manymove_planner uf850_action_server_node.launch.py
   ```
 
-- **Lite Series Manipulator**
+- **Lite Series Manipulator**:
   ```bash
   ros2 launch manymove_planner lite_action_server_node.launch.py
   ```
 
-- **Panda Manipulator**
+- **Panda Manipulator**:
   ```bash
   ros2 launch manymove_planner panda_action_server_node.launch.py
   ```
 
-- **Generic ManyMove Planner Node**
+- **Custom Configuration**:
   ```bash
   ros2 launch manymove_planner manymove_planner.launch.py
   ```
 
-### Example Usage
+### Client Example
 
-#### Sending Goals to the Action Server
-You can interact with the action server using a client node:
+- **Single Goal**:
+  Sends a single motion request (e.g., moving to a pose or joint target).
+  ```bash
+  ros2 run manymove_planner client_example_node
+  ```
 
-1. Run the action server:
-   ```bash
-   ros2 launch manymove_planner uf850_action_server_node.launch.py
-   ```
-
-2. Send a goal using the client node:
-   ```bash
-   ros2 run manymove_planner client_example_node
-   ```
-
-The client node demonstrates how to send action goals and receive feedback/results.
+- **Sequence of Goals**:
+  Demonstrates planning and executing a series of moves with feedback.
 
 ### Configuration Parameters
 
-The launch files support various parameters to customize robot behavior:
+- **Planner Type**:
+  - Choose `moveitcpp` or `movegroup` planners:
+    ```bash
+    --ros-args -p planner_type:=moveitcpp
+    ```
 
-- **Velocity and Acceleration Scaling:**
-  ```bash
-  --ros-args -p velocity_scaling_factor:=0.5 -p acceleration_scaling_factor:=0.5
-  ```
+- **Motion Planning Parameters**:
+  - Define the planning group, base frame, and tool frame:
+    ```bash
+    --ros-args -p planning_group:=<group_name> -p base_frame:=<frame_name> -p tcp_frame:=<frame_name>
+    ```
 
-- **Cartesian Motion Constraints:**
-  ```bash
-  --ros-args -p max_cartesian_speed:=0.5
-  ```
+- **Velocity and Acceleration**:
+  - Configure motion scaling factors:
+    ```bash
+    --ros-args -p velocity_scaling_factor:=0.5 -p acceleration_scaling_factor:=0.5
+    ```
 
-- **Planning Parameters:**
-  ```bash
-  --ros-args -p planning_group:=<group_name> -p base_frame:=<frame_name> -p tcp_frame:=<frame_name>
-  ```
+- **Cartesian Constraints**:
+  - Limit Cartesian speeds:
+    ```bash
+    --ros-args -p max_cartesian_speed:=0.5
+    ```
 
-Refer to the individual launch files for additional parameters and their default values.
+### Workflow
 
-## Message and Action Definitions
-
-### Actions
-
-1. **MoveManipulator.action**
-   ```
-   geometry_msgs/Pose target_pose
-   ---
-   bool success
-   ---
-   string feedback
-   ```
-
-2. **MoveManipulatorSequence.action**
-   ```
-   geometry_msgs/Pose[] target_poses
-   ---
-   bool success
-   ---
-   string feedback
-   ```
-
-### Messages
-
-1. **MovementConfig.msg**
-   ```
-   float64 velocity_scaling
-   float64 acceleration_scaling
-   ```
-
-2. **MoveManipulatorGoal.msg**
-   ```
-   geometry_msgs/Pose goal_pose
-   MovementConfig config
-   ```
+1. **Client Sends Request**:
+   - A single or sequence motion goal is sent using the `MoveManipulator` or `MoveManipulatorSequence` action.
+2. **Action Server Processes Request**:
+   - Handles the goal, plans a trajectory, applies time parameterization, and executes it using the configured planner.
+3. **Feedback and Results**:
+   - For sequences, periodic feedback is provided during execution.
+   - Final results are sent to the client on completion or failure.
 
 ## Core Components
 
-### **Core Motion Planning (`manymove_planner.cpp`)**
-The `manymove_planner.cpp` file implements the motion planning logic, serving as the computational backbone of the `manymove_planner` package. It interacts with MoveIt 2 to compute motion plans based on given goals, constraints, and configurations.
+### **Planner Interface**
+Defines a common interface for motion planners, including methods for:
+- Planning single and sequence trajectories.
+- Executing trajectories with or without feedback.
+- Applying time parameterization.
 
-### **Action Server (`action_server.cpp`)**
-The `action_server.cpp` file defines an action server for handling motion requests. It delegates planning tasks to `manymove_planner.cpp` and manages the lifecycle of actions, including providing feedback and results.
+### **MoveItCppPlanner**
+Uses MoveItCpp for planning and execution. Supports:
+- Flexible configurations.
+- Integration with MoveIt trajectory smoothing and parameterization.
 
-### **Action Server Node (`action_server_node.cpp`)**
-This node initializes the action server defined in `action_server.cpp` and integrates it into the ROS 2 environment. It handles parameter configuration, node spinning, and communication setup for the server.
+### **Action Server**
+Manages action lifecycle for single and sequential moves:
+- Processes goals and cancellations.
+- Executes planned trajectories using the configured planner.
 
-### **Relationship and Workflow**
-1. **Interaction Initiation**:
-   - Clients send motion requests via actions (`MoveManipulator.action`, `MoveManipulatorSequence.action`).
-   - `action_server_node.cpp` receives these requests and passes them to the `action_server.cpp`.
-
-2. **Planning Execution**:
-   - The action server delegates motion planning tasks to `manymove_planner.cpp`, passing along the target poses and any constraints.
-   - `manymove_planner.cpp` computes a feasible trajectory using MoveIt 2 APIs and returns the plan.
-
-3. **Result Handling**:
-   - The computed plan is sent back to `action_server.cpp`, which monitors its execution and provides feedback to the client.
-   - Upon completion or failure, the action server sends the result back to the client.
-
-4. **Node Deployment**:
-   - The `action_server_node.cpp` ensures the action server runs within the ROS 2 ecosystem, handling ROS-specific functionality such as spinning the node and managing parameters.
+### **Client Example Node**
+Demonstrates:
+- Sending single or sequence motion goals.
+- Configuring movement parameters such as velocity and acceleration.
 
 ## Contribution
 
-Feel free to contribute to this project by submitting issues or pull requests. For major changes, please open an issue first to discuss what you would like to change.
+Contributions are welcome. Please submit issues or pull requests for new features or bug fixes.
 
 ## License
 
 This project is licensed under the Apache 2.0 License. See the `LICENSE` file for details.
-
