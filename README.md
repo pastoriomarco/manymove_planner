@@ -28,12 +28,67 @@ The `manymove_planner` project provides a robust framework for planning and exec
 4. **Client Node**:
    - Demonstrates sending single and sequence motion goals.
 
+## Message and Action Definitions
+
+### **Messages**
+
+#### **MovementConfig.msg**
+Defines the configuration parameters for robotic movements, to be defined for each move of a sequence.
+
+
+Planning params for all movements:
+- `max_cartesian_speed`: Maximum speed for Cartesian movements (m/s), enforced by manymove_planner functions.
+- `smoothing_type`: Type of trajectory smoothing (e.g., time-optimal, spline), set for manymove_planner functions.
+- `velocity_scaling_factor`: Factor to scale the velocity (0.0 - 1.0), set on planners params, may be modified by manymove_planners functions.
+- `acceleration_scaling_factor`: Factor to scale the acceleration (0.0 - 1.0), set on planners params, may be modified by manymove_planners functions.
+Planning params only for cartesian/linear movements:
+- `step_size`: Step size for Cartesian planning.
+- `jump_threshold`: Threshold to avoid jumps in Cartesian paths.
+Planning params to try and optimize path length by repeating planning for the same move:
+- `plan_number_target`: Target number of plans for sampling-based planners.
+- `plan_number_limit`: Limit on the number of plans for sampling-based planners.
+Execution parameters:
+- `max_exec_tries`: Maximum execution attempts for retrying plans.
+
+#### **MoveManipulatorGoal.msg**
+Represents a single goal for manipulator movement:
+IMPORTANT:Only one kind of movement is taken into consideration for any move, and it is determined by the movement_type variable.
+All other movements won't be considered if they have a If the relative move is not correctly 
+- `movement_type`: Type of movement (`pose`, `joint`, `named`, or `cartesian`).
+- `pose_target`: Desired pose for the manipulator in either for 'pose' or 'cartesian' move.
+- `named_target`: Predefined named target position for 'name' joint move.
+- `joint_values`: Specific joint values for the manipulator, for 'joint' move.
+IMPORTANT: start_joint_values is to be specified only to plan a trajectory that don't start from the current position of the robot, to plan before the robot get there.
+If a plan that were planned with start_joint_values is executed from another start position the execution will fail.
+- `start_joint_values`: Starting joint configuration.
+- `config`: Configuration parameters for movement, defined in `MovementConfig`.
+
+### **Actions**
+
+#### **MoveManipulator.action**
+Defines the structure for single-move actions:
+- **Goal**:
+  - `goal`: A `MoveManipulatorGoal` object specifying the desired movement.
+- **Result**:
+  - `success`: Boolean indicating whether the movement succeeded.
+  - `message`: Detailed message about the result.
+- **Feedback**:
+  - `progress`: Progress of the movement as a percentage (0.0 - 100.0).
+
+#### **MoveManipulatorSequence.action**
+Defines the structure for sequential-move actions:
+- **Goal**:
+  - `goals`: An array of `MoveManipulatorGoal` objects for the sequence.
+- **Result**:
+  - `success`: Boolean indicating whether the sequence succeeded.
+  - `message`: Detailed message about the result.
+- **Feedback**:
+  - `progress`: Progress of the sequence as a percentage (0.0 - 100.0).
+
 ## Requirements
 
-- ROS 2 (Foxy or later)
-- MoveIt 2
-- Required ROS 2 dependencies:
-  - `rclcpp`, `moveit_core`, `geometry_msgs`, `action_msgs`, `control_msgs`, `rosidl_default_generators`
+- ROS 2 (tested on Humble)
+- MoveIt 2 & its relative robot package
 
 ## Installation
 
@@ -62,14 +117,14 @@ Ensure ROS 2 and MoveIt 2 are installed. Follow the [MoveIt 2 installation guide
 
 ### Launching the Action Server
 
-- **UF850 Manipulator**:
-  ```bash
-  ros2 launch manymove_planner uf850_action_server_node.launch.py
-  ```
-
 - **Lite Series Manipulator**:
   ```bash
   ros2 launch manymove_planner lite_action_server_node.launch.py
+  ```
+
+- **UF850 Manipulator**:
+  ```bash
+  ros2 launch manymove_planner uf850_action_server_node.launch.py
   ```
 
 - **Panda Manipulator**:
@@ -92,6 +147,7 @@ Ensure ROS 2 and MoveIt 2 are installed. Follow the [MoveIt 2 installation guide
 
 - **Sequence of Goals**:
   Demonstrates planning and executing a series of moves with feedback.
+  The feedback is needed to understand at what point of the motion sequence the robot currently is, and to use this info to manage an execution failure.
 
 ### Configuration Parameters
 
