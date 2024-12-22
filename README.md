@@ -30,9 +30,7 @@ The `manymove_planner` project provides a robust framework for planning and exec
 
 ## Message and Action Definitions
 
-### **Messages**
-
-#### **MovementConfig.msg**
+### **MovementConfig.msg**
 Defines the configuration parameters for robotic movements:
 
 **Planning parameters for all movements:**
@@ -52,7 +50,7 @@ Defines the configuration parameters for robotic movements:
 **Execution parameters:**
 - `max_exec_tries`: Maximum execution attempts for retrying plans.
 
-#### **MoveManipulatorGoal.msg**
+### **MoveManipulatorGoal.msg**
 Represents a single goal for manipulator movement:
 
 **IMPORTANT:** Only one type of movement is considered for each move, determined by the `movement_type` variable. If other movement fields are specified, they will be ignored unless correctly aligned with `movement_type`.
@@ -69,9 +67,7 @@ Represents a single goal for manipulator movement:
 - `config`: Configuration parameters for movement, defined in `MovementConfig`.
 
 
-### **Actions**
-
-#### **MoveManipulator.action**
+### **MoveManipulator.action**
 Defines the structure for single-move actions:
 - **Goal**:
   - `goal`: A `MoveManipulatorGoal` object specifying the desired movement.
@@ -81,7 +77,7 @@ Defines the structure for single-move actions:
 - **Feedback**:
   - `progress`: Progress of the movement as a percentage (0.0 - 100.0).
 
-#### **MoveManipulatorSequence.action**
+### **MoveManipulatorSequence.action**
 Defines the structure for sequential-move actions:
 - **Goal**:
   - `goals`: An array of `MoveManipulatorGoal` objects for the sequence.
