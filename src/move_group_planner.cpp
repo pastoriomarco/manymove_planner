@@ -6,13 +6,17 @@ MoveGroupPlanner::MoveGroupPlanner(
     const std::string &base_frame,
     const std::string &tcp_frame,
     const std::string &traj_controller)
-    : node_(node), logger_(node->get_logger()), base_frame_(base_frame), tcp_frame_(tcp_frame), traj_controller_(traj_controller)
+    : node_(node), logger_(node->get_logger()),
+      planning_group_(planning_group),
+      base_frame_(base_frame),
+      tcp_frame_(tcp_frame),
+      traj_controller_(traj_controller)
 {
     // Initialize MoveGroupInterface with the shared node
-    move_group_interface_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(node_, planning_group);
+    move_group_interface_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(node_, planning_group_);
     move_group_interface_->setPlanningTime(5.0);
 
-    RCLCPP_INFO(logger_, "MoveGroupPlanner initialized with group: %s", planning_group.c_str());
+    RCLCPP_INFO(logger_, "MoveGroupPlanner initialized with group: %s", planning_group_.c_str());
 
     // Initialize FollowJointTrajectory action client
     follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/" + traj_controller_ + "/follow_joint_trajectory");

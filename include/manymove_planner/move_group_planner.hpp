@@ -136,6 +136,7 @@ private:
 
     rclcpp::Node::SharedPtr node_; ///< Shared pointer to the ROS2 node
     rclcpp::Logger logger_; ///< Logger instance for logging messages
+    std::string planning_group_; ///< Name of the planning group
     std::string base_frame_; ///< The base frame of the robot
     std::string tcp_frame_; ///< The tool center point (TCP) frame
     std::string traj_controller_; ///< Name of the trajectory controller

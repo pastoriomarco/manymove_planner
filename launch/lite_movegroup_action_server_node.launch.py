@@ -42,8 +42,8 @@ def launch_setup(context, *args, **kwargs):
     geometry_mesh_tcp_xyz = LaunchConfiguration('geometry_mesh_tcp_xyz', default='"0.03075 0 0.11885"')
     geometry_mesh_tcp_rpy = LaunchConfiguration('geometry_mesh_tcp_rpy', default='"0 0.52 0"')
 
-    no_gui_ctrl = LaunchConfiguration('no_gui_ctrl', default=False)
-    ros_namespace = LaunchConfiguration('ros_namespace', default='').perform(context)
+    # no_gui_ctrl = LaunchConfiguration('no_gui_ctrl', default=False)
+    # ros_namespace = LaunchConfiguration('ros_namespace', default='').perform(context)
 
     velocity_scaling_factor = LaunchConfiguration('velocity_scaling_factor')
     acceleration_scaling_factor = LaunchConfiguration('acceleration_scaling_factor')
@@ -131,12 +131,11 @@ def launch_setup(context, *args, **kwargs):
                 'max_cartesian_speed': max_cartesian_speed,
                 'plan_number_target': plan_number_target,
                 'plan_number_limit': plan_number_limit,
-                # Adding the new parameters here
                 'planning_group': planning_group,
                 'base_frame': base_frame,
                 'tcp_frame': tcp_frame,
                 'traj_controller': traj_controller,
-
+                'prefix': prefix,
             }
         ],
     )

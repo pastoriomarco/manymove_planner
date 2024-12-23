@@ -10,14 +10,17 @@ MoveItCppPlanner::MoveItCppPlanner(
     const std::string &base_frame,
     const std::string &tcp_frame,
     const std::string &traj_controller)
-    : node_(node), logger_(node->get_logger()), planning_group_(planning_group), base_frame_(base_frame), tcp_frame_(tcp_frame), traj_controller_(traj_controller)
+    : node_(node), logger_(node->get_logger()),
+      planning_group_(planning_group),
+      base_frame_(base_frame), tcp_frame_(tcp_frame),
+      traj_controller_(traj_controller)
 {
     moveit_cpp_ptr_ = std::make_shared<moveit_cpp::MoveItCpp>(node_);
     moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
 
-    planning_components_ = std::make_shared<moveit_cpp::PlanningComponent>(planning_group, moveit_cpp_ptr_);
+    planning_components_ = std::make_shared<moveit_cpp::PlanningComponent>(planning_group_, moveit_cpp_ptr_);
     RCLCPP_INFO(logger_, "===================================================");
-    RCLCPP_INFO(logger_, "MoveItCppPlanner initialized with group: %s", planning_group.c_str());
+    RCLCPP_INFO(logger_, "MoveItCppPlanner initialized with group: %s", planning_group_.c_str());
 
     plan_parameters_.load(node_);
 
