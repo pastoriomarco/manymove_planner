@@ -1,7 +1,9 @@
 # Goal
 manymove_planner/MoveManipulatorGoal[] goals
 ---
+# Result
 bool success
 string message
 ---
+# Feedback
 float32 progress

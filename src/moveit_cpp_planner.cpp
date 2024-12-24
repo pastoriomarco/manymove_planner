@@ -602,8 +602,8 @@ bool MoveItCppPlanner::executeTrajectoryWithFeedback(
         if (start_search < 0)
             start_search = 0;
 
-        // End the search at last_found_index + 16 or the end of the waypoint list
-        size_t end_search = std::min(last_found_index + 16, waypoints.size());
+        // End the search at last_found_index + 3 or the end of the waypoint list
+        size_t end_search = std::min(last_found_index + 3, waypoints.size());
 
         double tolerance = 1e-2; // Increased tolerance from 1e-4 to 1e-2
         size_t best_idx = last_found_index;

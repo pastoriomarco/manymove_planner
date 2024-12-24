@@ -28,7 +28,7 @@ public:
             RCLCPP_WARN(this->get_logger(), "Sequence action server not available");
         }
 
-        // // Example: Send a single move
+        // Example: Send a single move
         // sendSingleMove();
 
         // Example: Send a sequence of moves
@@ -39,19 +39,6 @@ private:
     rclcpp_action::Client<MoveManipulator>::SharedPtr single_client_;
     rclcpp_action::Client<MoveManipulatorSequence>::SharedPtr sequence_client_;
 
-    void fillConfig(manymove_planner::msg::MovementConfig &config, double vel, double accel, double step, double jump, double max_speed, const std::string &smoothing)
-    {
-        config.velocity_scaling_factor = vel;
-        config.acceleration_scaling_factor = accel;
-        config.step_size = step;
-        config.jump_threshold = jump;
-        config.max_cartesian_speed = max_speed;
-        config.max_exec_tries = 5;
-        config.plan_number_target = 8;
-        config.plan_number_limit = 16;
-        config.smoothing_type = smoothing;
-    }
-
     void sendSingleMove()
     {
         if (!single_client_)
@@ -60,9 +47,9 @@ private:
             return;
         }
 
-        MoveManipulator::Goal goal;
+        MoveManipulator::Goal single_goal;
         // Setup a pose move
-        goal.goal.movement_type = "pose";
+        single_goal.goal.movement_type = "pose";
         geometry_msgs::msg::Pose target_pose;
         target_pose.position.x = 0.2;
         target_pose.position.y = 0.0;
@@ -71,9 +58,18 @@ private:
         target_pose.orientation.y = 0.0;
         target_pose.orientation.z = 0.0;
         target_pose.orientation.w = 0.0;
-        goal.goal.pose_target = target_pose;
-        goal.goal.start_joint_values = {};
-        fillConfig(goal.goal.config, 0.5, 0.5, 0.01, 0.02, 0.5, "time_optimal");
+        single_goal.goal.pose_target = target_pose;
+        single_goal.goal.start_joint_values = {};
+
+        single_goal.goal.config.velocity_scaling_factor = 1.0;
+        single_goal.goal.config.acceleration_scaling_factor = 1.0;
+        single_goal.goal.config.step_size = 0.01;
+        single_goal.goal.config.jump_threshold = 0.0;
+        single_goal.goal.config.max_cartesian_speed = 0.5;
+        single_goal.goal.config.max_exec_tries = 5;
+        single_goal.goal.config.plan_number_target = 8;
+        single_goal.goal.config.plan_number_limit = 32;
+        single_goal.goal.config.smoothing_type = "time_optimal";
 
         auto send_goal_options = rclcpp_action::Client<MoveManipulator>::SendGoalOptions();
         send_goal_options.result_callback =
@@ -90,7 +86,7 @@ private:
         };
 
         RCLCPP_INFO(this->get_logger(), "Sending single move goal");
-        single_client_->async_send_goal(goal, send_goal_options);
+        single_client_->async_send_goal(single_goal, send_goal_options);
     }
 
     void sendSequenceOfMoves()
