@@ -107,7 +107,7 @@ private:
         max_move_config.acceleration_scaling_factor = 1.0;
         max_move_config.step_size = 0.01;
         max_move_config.jump_threshold = 0.0;
-        max_move_config.max_cartesian_speed = 0.5;
+        max_move_config.max_cartesian_speed = 1.0;
         max_move_config.max_exec_tries = 5;
         max_move_config.plan_number_target = 8;
         max_move_config.plan_number_limit = 32;
@@ -166,7 +166,7 @@ private:
         pose_test.pose_target.orientation.y = 0.0;
         pose_test.pose_target.orientation.z = 0.0;
         pose_test.pose_target.orientation.w = 0.0;
-        pose_test.config = mid_move_config;
+        pose_test.config = max_move_config;
         moves.push_back(pose_test);
 
         // Cartesian move using previous move as start
@@ -175,7 +175,8 @@ private:
         pose_test.config = slow_move_config;
         moves.push_back(pose_test);
 
-        // Repeating initial move to get back to start:
+        // Repeating initial move to get back to start, but with high speed:
+        joint_rest.config = max_move_config;
         moves.push_back(joint_rest);
 
         MoveManipulatorSequence::Goal seq_goal;

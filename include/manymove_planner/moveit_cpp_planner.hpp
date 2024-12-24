@@ -146,15 +146,15 @@ private:
     moveit_msgs::msg::RobotTrajectory convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const;
 
     rclcpp::Node::SharedPtr node_; ///< Shared pointer to the ROS2 node
-    rclcpp::Logger logger_; ///< Logger instance for logging messages
-    std::string planning_group_; ///< Name of the planning group
-    std::string base_frame_; ///< The base frame of the robot
-    std::string tcp_frame_; ///< The tool center point (TCP) frame
-    std::string traj_controller_; ///< Name of the trajectory controller
+    rclcpp::Logger logger_;        ///< Logger instance for logging messages
+    std::string planning_group_;   ///< Name of the planning group
+    std::string base_frame_;       ///< The base frame of the robot
+    std::string tcp_frame_;        ///< The tool center point (TCP) frame
+    std::string traj_controller_;  ///< Name of the trajectory controller
 
-    std::shared_ptr<moveit_cpp::MoveItCpp> moveit_cpp_ptr_; ///< Shared pointer to the MoveItCpp instance
-    std::shared_ptr<moveit_cpp::PlanningComponent> planning_components_; ///< Shared pointer to the PlanningComponent instance
-    moveit_cpp::PlanningComponent::PlanRequestParameters plan_parameters_; ///< Planning parameters at startup  
+    std::shared_ptr<moveit_cpp::MoveItCpp> moveit_cpp_ptr_;                ///< Shared pointer to the MoveItCpp instance
+    std::shared_ptr<moveit_cpp::PlanningComponent> planning_components_;   ///< Shared pointer to the PlanningComponent instance
+    moveit_cpp::PlanningComponent::PlanRequestParameters plan_parameters_; ///< Planning parameters at startup
 
     rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr follow_joint_traj_client_; ///< Action client for FollowJointTrajectory
 };

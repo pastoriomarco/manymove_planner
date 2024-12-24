@@ -166,10 +166,10 @@ bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajecto
         }
         else
         {
-            double scale = config.max_cartesian_speed / max_speed;
+            double scale = (config.max_cartesian_speed * 0.99) / max_speed;
             velocity_scaling_factor *= scale;
             // Adjust acceleration similarly (heuristic)
-            acceleration_scaling_factor = (acceleration_scaling_factor * scale + acceleration_scaling_factor) / 2.0;
+            // acceleration_scaling_factor = (acceleration_scaling_factor * scale + acceleration_scaling_factor) / 2.0;
 
             if (velocity_scaling_factor < 0.01 || acceleration_scaling_factor < 0.01)
             {
