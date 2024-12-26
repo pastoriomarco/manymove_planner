@@ -458,7 +458,7 @@ bool MoveItCppPlanner::applyTimeParameterization(
             RCLCPP_WARN(logger_, "Limiting cartesian speed failed, trying again limiting scaling factors...");
             double scale = (config.max_cartesian_speed * 0.99) / max_speed;
             velocity_scaling_factor *= scale;
-            // Adjust acceleration similarly 
+            // Adjust acceleration similarly
             // acceleration_scaling_factor = (acceleration_scaling_factor * scale + acceleration_scaling_factor) / 2.0;
 
             if (velocity_scaling_factor < 0.01 || acceleration_scaling_factor < 0.01)
@@ -473,86 +473,58 @@ bool MoveItCppPlanner::applyTimeParameterization(
     return false;
 }
 
-bool MoveItCppPlanner::executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory)
+bool MoveItCppPlanner::executeTrajectory(
+    const moveit_msgs::msg::RobotTrajectory &trajectory)
 {
-    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(5)))
+    // Ensure the MoveItCpp instance is ready
+    if (!moveit_cpp_ptr_)
     {
-        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available");
+        RCLCPP_ERROR(logger_, "MoveItCpp instance not available");
         return false;
     }
 
-    control_msgs::action::FollowJointTrajectory::Goal follow_goal;
-    follow_goal.trajectory = trajectory.joint_trajectory;
-
-    auto result_promise = std::make_shared<std::promise<bool>>();
-    std::future<bool> result_future = result_promise->get_future();
-
-    auto send_goal_options = rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SendGoalOptions();
-
-    // No feedback needed here
-    send_goal_options.feedback_callback = [](auto, const auto &) {};
-
-    send_goal_options.result_callback =
-        [this, result_promise](const auto &result)
+    // Ensure trajectory is not empty
+    if (trajectory.joint_trajectory.points.empty())
     {
-        bool success = false;
-        switch (result.code)
-        {
-        case rclcpp_action::ResultCode::SUCCEEDED:
-            RCLCPP_INFO(logger_, "FollowJointTrajectory succeeded");
-            success = true;
-            break;
-        case rclcpp_action::ResultCode::ABORTED:
-            RCLCPP_ERROR(logger_, "FollowJointTrajectory aborted");
-            success = false;
-            break;
-        case rclcpp_action::ResultCode::CANCELED:
-            RCLCPP_WARN(logger_, "FollowJointTrajectory canceled");
-            success = false;
-            break;
-        default:
-            RCLCPP_ERROR(logger_, "Unknown result code from FollowJointTrajectory");
-            success = false;
-            break;
-        }
-        result_promise->set_value(success);
-    };
-
-    auto goal_handle_future = follow_joint_traj_client_->async_send_goal(follow_goal, send_goal_options);
-
-    // Wait for the goal handle to be ready
-    if (goal_handle_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
-    {
-        RCLCPP_ERROR(logger_, "Failed to send goal to FollowJointTrajectory action server within the timeout");
+        RCLCPP_ERROR(logger_, "Trajectory has no points to execute");
         return false;
     }
 
-    auto goal_handle_result = goal_handle_future.get();
-    if (!goal_handle_result)
-    {
-        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server rejected the goal");
-        return false;
-    }
+    // Convert the input trajectory to a RobotTrajectoryPtr
+    auto robot_trajectory_ptr = std::make_shared<robot_trajectory::RobotTrajectory>(
+        moveit_cpp_ptr_->getRobotModel(), planning_group_);
+    robot_trajectory_ptr->setRobotTrajectoryMsg(*moveit_cpp_ptr_->getCurrentState(), trajectory);
 
-    // Wait for the result future
-    if (result_future.wait_for(std::chrono::seconds(120)) == std::future_status::timeout)
-    {
-        RCLCPP_ERROR(logger_, "FollowJointTrajectory action did not complete within the timeout");
-        return false;
-    }
+    // Execute trajectory using MoveItCpp
+    auto status = moveit_cpp_ptr_->execute(planning_group_, robot_trajectory_ptr, true);
 
-    bool exec_success = result_future.get();
-    if (exec_success)
+    if (status == moveit_controller_manager::ExecutionStatus::SUCCEEDED)
     {
         RCLCPP_INFO(logger_, "Trajectory execution succeeded");
         return true;
     }
-    else
+    else if (status == moveit_controller_manager::ExecutionStatus::FAILED)
     {
         RCLCPP_ERROR(logger_, "Trajectory execution failed");
         return false;
     }
+    else if (status == moveit_controller_manager::ExecutionStatus::PREEMPTED)
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution was preempted");
+        return false;
+    }
+    else if (status == moveit_controller_manager::ExecutionStatus::TIMED_OUT)
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution timed out");
+        return false;
+    }
+    else
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution failed with an unknown status");
+        return false;
+    }
 }
+
 
 bool MoveItCppPlanner::executeTrajectoryWithFeedback(
     const moveit_msgs::msg::RobotTrajectory &trajectory,

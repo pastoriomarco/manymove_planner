@@ -1,0 +1,6 @@
+# Request
+manymove_planner/MoveManipulatorGoal goal
+---
+# Response
+bool success
+moveit_msgs/RobotTrajectory trajectory

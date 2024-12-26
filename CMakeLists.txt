@@ -24,7 +24,9 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "action/MoveManipulatorSequence.action"
   "msg/MovementConfig.msg"
   "msg/MoveManipulatorGoal.msg"
-  DEPENDENCIES geometry_msgs action_msgs
+  "srv/PlanManipulator.srv"
+  "action/ExecuteTrajectory.action"
+  DEPENDENCIES geometry_msgs action_msgs moveit_msgs
 )
 
 # Get the typesupport target for linking
