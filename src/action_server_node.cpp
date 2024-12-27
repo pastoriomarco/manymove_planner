@@ -49,7 +49,7 @@ int main(int argc, char **argv)
 
     auto server = std::make_shared<MoveManipulatorActionServer>(node, planner);
 
-    rclcpp::executors::SingleThreadedExecutor executor;
+    rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(node);
     executor.spin();
 

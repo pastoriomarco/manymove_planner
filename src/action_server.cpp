@@ -1,5 +1,5 @@
 #include "manymove_planner/planner_interface.hpp"
-#include "manymove_planner/srv/plan_manipulator.hpp"
+#include "manymove_planner/action/plan_manipulator.hpp"
 #include "manymove_planner/action/move_manipulator.hpp"
 #include "manymove_planner/action/move_manipulator_sequence.hpp"
 #include "manymove_planner/action/execute_trajectory.hpp"
@@ -13,6 +13,9 @@ public:
     using MoveManipulatorSequence = manymove_planner::action::MoveManipulatorSequence;
     using GoalHandleMoveManipulator = rclcpp_action::ServerGoalHandle<MoveManipulator>;
     using GoalHandleMoveManipulatorSequence = rclcpp_action::ServerGoalHandle<MoveManipulatorSequence>;
+
+    using PlanManipulator = manymove_planner::action::PlanManipulator;
+    using GoalHandlePlanManipulator = rclcpp_action::ServerGoalHandle<PlanManipulator>;
 
     using ExecuteTrajectory = manymove_planner::action::ExecuteTrajectory;
     using GoalHandleExecuteTrajectory = rclcpp_action::ServerGoalHandle<ExecuteTrajectory>;
@@ -35,9 +38,12 @@ public:
             std::bind(&MoveManipulatorActionServer::handle_sequence_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_sequence_accepted, this, std::placeholders::_1));
 
-        plan_service_ = node_->create_service<manymove_planner::srv::PlanManipulator>(
+        plan_action_server_ = rclcpp_action::create_server<PlanManipulator>(
+            node_,
             "plan_manipulator",
-            std::bind(&MoveManipulatorActionServer::handle_plan_service, this, std::placeholders::_1, std::placeholders::_2));
+            std::bind(&MoveManipulatorActionServer::handle_plan_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&MoveManipulatorActionServer::handle_plan_cancel, this, std::placeholders::_1),
+            std::bind(&MoveManipulatorActionServer::handle_plan_accepted, this, std::placeholders::_1));
 
         execute_action_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
@@ -54,9 +60,8 @@ private:
     rclcpp_action::Server<MoveManipulator>::SharedPtr single_action_server_;
     rclcpp_action::Server<MoveManipulatorSequence>::SharedPtr sequence_action_server_;
 
+    rclcpp_action::Server<PlanManipulator>::SharedPtr plan_action_server_;
     rclcpp_action::Server<ExecuteTrajectory>::SharedPtr execute_action_server_;
-
-    rclcpp::Service<manymove_planner::srv::PlanManipulator>::SharedPtr plan_service_;
 
     rclcpp_action::GoalResponse handle_single_goal(
         const rclcpp_action::GoalUUID &uuid,
@@ -205,47 +210,117 @@ private:
         }
     }
 
-    void handle_plan_service(
-        const std::shared_ptr<manymove_planner::srv::PlanManipulator::Request> request,
-        std::shared_ptr<manymove_planner::srv::PlanManipulator::Response> response)
+    // void handle_plan_service(
+    //     const std::shared_ptr<manymove_planner::srv::PlanManipulator::Request> request,
+    //     std::shared_ptr<manymove_planner::srv::PlanManipulator::Response> response)
+    // {
+    //     RCLCPP_INFO(node_->get_logger(), "Received request to plan manipulator move");
+
+    //     // Convert srv::PlanManipulator::Request to action::MoveManipulator::Goal
+    //     manymove_planner::action::MoveManipulator::Goal action_goal;
+    //     action_goal.goal = request->goal;
+
+    //     // Call the planner to generate the trajectory
+    //     auto [success, trajectory] = planner_->plan(action_goal);
+
+    //     if (!success)
+    //     {
+    //         RCLCPP_ERROR(node_->get_logger(), "Planning failed");
+    //         response->success = false;
+    //         return;
+    //     }
+
+    //     // Apply time parameterization
+    //     std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
+    //     std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {request->goal.config};
+    //     std::vector<size_t> sizes;
+
+    //     auto [param_success, final_trajectory] = planner_->applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
+
+    //     if (!param_success)
+    //     {
+    //         RCLCPP_ERROR(node_->get_logger(), "Time parameterization failed");
+    //         response->success = false;
+    //         return;
+    //     }
+
+    //     // Populate the response
+    //     response->success = true;
+    //     response->trajectory = final_trajectory;
+
+    //     RCLCPP_INFO(node_->get_logger(), "Planning and time parameterization succeeded");
+    // }
+
+    rclcpp_action::GoalResponse handle_plan_goal(
+        const rclcpp_action::GoalUUID &uuid,
+        std::shared_ptr<const PlanManipulator::Goal> goal_msg)
     {
-        RCLCPP_INFO(node_->get_logger(), "Received request to plan manipulator move");
+        RCLCPP_INFO(node_->get_logger(), "Received PlanManipulator action goal request");
+        (void)uuid;
+        (void)goal_msg;
+        // Optionally validate goal_msg->goal ...
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
 
-        // Convert srv::PlanManipulator::Request to action::MoveManipulator::Goal
-        manymove_planner::action::MoveManipulator::Goal action_goal;
-        action_goal.goal = request->goal;
+    rclcpp_action::CancelResponse handle_plan_cancel(
+        const std::shared_ptr<GoalHandlePlanManipulator> goal_handle)
+    {
+        (void)goal_handle;
+        RCLCPP_INFO(node_->get_logger(), "Received request to cancel PlanManipulator goal");
+        // For a pure planning action, you might accept or reject cancellation
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
 
-        // Call the planner to generate the trajectory
-        auto [success, trajectory] = planner_->plan(action_goal);
+    void handle_plan_accepted(
+        const std::shared_ptr<GoalHandlePlanManipulator> goal_handle)
+    {
+        // Spin off a new thread to do planning so we don't block the executor
+        std::thread{std::bind(&MoveManipulatorActionServer::execute_plan_goal, this, goal_handle)}.detach();
+    }
 
+    void execute_plan_goal(
+        const std::shared_ptr<GoalHandlePlanManipulator> goal_handle)
+    {
+        auto result = std::make_shared<PlanManipulator::Result>();
+        const auto &goal_msg = goal_handle->get_goal(); // plan_manipulator::Goal
+
+        // 1) Actually plan
+        manymove_planner::action::MoveManipulator::Goal internal_goal;
+        internal_goal.goal = goal_msg->goal; // reusing the existing "MoveManipulatorGoal"
+
+        auto [success, trajectory] = planner_->plan(internal_goal);
         if (!success)
         {
-            RCLCPP_ERROR(node_->get_logger(), "Planning failed");
-            response->success = false;
+            RCLCPP_ERROR(node_->get_logger(), "Planning failed for plan_manipulator action");
+            result->success = false;
+            goal_handle->abort(result);
             return;
         }
 
-        // Apply time parameterization
+        // 2) Time parameterization
         std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
-        std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {request->goal.config};
+        std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {goal_msg->goal.config};
         std::vector<size_t> sizes;
 
-        auto [param_success, final_trajectory] = planner_->applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
+        auto [param_success, final_trajectory] =
+            planner_->applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
 
         if (!param_success)
         {
-            RCLCPP_ERROR(node_->get_logger(), "Time parameterization failed");
-            response->success = false;
+            RCLCPP_ERROR(node_->get_logger(), "Time param failed for plan_manipulator action");
+            result->success = false;
+            goal_handle->abort(result);
             return;
         }
 
-        // Populate the response
-        response->success = true;
-        response->trajectory = final_trajectory;
+        // If you want to send feedback in real-time, you can do so in applyTimeParameterization() or
+        //   break it into steps. For simplicity, let's just finalize the result:
+        result->success = true;
+        result->trajectory = final_trajectory;
 
-        RCLCPP_INFO(node_->get_logger(), "Planning and time parameterization succeeded");
+        RCLCPP_INFO(node_->get_logger(), "PlanManipulator action Succeeded");
+        goal_handle->succeed(result);
     }
-
 
     rclcpp_action::GoalResponse handle_execute_goal(
         const rclcpp_action::GoalUUID &uuid,

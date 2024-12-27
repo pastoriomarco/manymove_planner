@@ -6,6 +6,7 @@ from launch.actions import OpaqueFunction, DeclareLaunchArgument
 # from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 from uf_ros_lib.uf_robot_utils import generate_ros2_control_params_temp_file
+from launch.launch_description_sources import load_python_launch_file_as_module
 from uf_ros_lib.moveit_configs_builder import MoveItConfigsBuilder
 
 
@@ -181,12 +182,21 @@ def launch_setup(context, *args, **kwargs):
         parameters=[moveit_config.robot_description],
     )
 
+    mod = load_python_launch_file_as_module(os.path.join(get_package_share_directory('xarm_api'), 'launch', 'lib', 'robot_api_lib.py'))
+    generate_robot_api_params = getattr(mod, 'generate_robot_api_params')
+    robot_params = generate_robot_api_params(
+        os.path.join(get_package_share_directory('xarm_api'), 'config', 'xarm_params.yaml'),
+        os.path.join(get_package_share_directory('xarm_api'), 'config', 'xarm_user_params.yaml'),
+        LaunchConfiguration('ros_namespace', default='').perform(context), node_name='ufactory_driver'
+    )
+
     ros2_control_node = Node(
         package='controller_manager',
         executable='ros2_control_node',
         parameters=[
             moveit_config.robot_description,
             ros2_control_params,
+            robot_params,
         ],
         output='screen',
     )

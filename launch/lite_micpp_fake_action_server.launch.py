@@ -226,6 +226,8 @@ def launch_setup(context, *args, **kwargs):
         rviz_node,
     ] + controller_nodes
 
+    # return [move_group_node]
+
 
 def generate_launch_description():
     return LaunchDescription([

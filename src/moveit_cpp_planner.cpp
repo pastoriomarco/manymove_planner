@@ -16,7 +16,11 @@ MoveItCppPlanner::MoveItCppPlanner(
       traj_controller_(traj_controller)
 {
     moveit_cpp_ptr_ = std::make_shared<moveit_cpp::MoveItCpp>(node_);
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
+    moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService(); 
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->requestPlanningSceneState("get_planning_scene");
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startSceneMonitor("planning_scene");
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startWorldGeometryMonitor("attached_collision_object", "planning_scene_world", true);
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->monitorDiffs(true);
 
     planning_components_ = std::make_shared<moveit_cpp::PlanningComponent>(planning_group_, moveit_cpp_ptr_);
     RCLCPP_INFO(logger_, "===================================================");
@@ -524,7 +528,6 @@ bool MoveItCppPlanner::executeTrajectory(
         return false;
     }
 }
-
 
 bool MoveItCppPlanner::executeTrajectoryWithFeedback(
     const moveit_msgs::msg::RobotTrajectory &trajectory,
