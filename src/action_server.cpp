@@ -210,47 +210,6 @@ private:
         }
     }
 
-    // void handle_plan_service(
-    //     const std::shared_ptr<manymove_planner::srv::PlanManipulator::Request> request,
-    //     std::shared_ptr<manymove_planner::srv::PlanManipulator::Response> response)
-    // {
-    //     RCLCPP_INFO(node_->get_logger(), "Received request to plan manipulator move");
-
-    //     // Convert srv::PlanManipulator::Request to action::MoveManipulator::Goal
-    //     manymove_planner::action::MoveManipulator::Goal action_goal;
-    //     action_goal.goal = request->goal;
-
-    //     // Call the planner to generate the trajectory
-    //     auto [success, trajectory] = planner_->plan(action_goal);
-
-    //     if (!success)
-    //     {
-    //         RCLCPP_ERROR(node_->get_logger(), "Planning failed");
-    //         response->success = false;
-    //         return;
-    //     }
-
-    //     // Apply time parameterization
-    //     std::vector<moveit_msgs::msg::RobotTrajectory> single_traj_vec = {trajectory};
-    //     std::vector<manymove_planner::msg::MovementConfig> single_config_vec = {request->goal.config};
-    //     std::vector<size_t> sizes;
-
-    //     auto [param_success, final_trajectory] = planner_->applyTimeParametrizationSequence(single_traj_vec, single_config_vec, sizes);
-
-    //     if (!param_success)
-    //     {
-    //         RCLCPP_ERROR(node_->get_logger(), "Time parameterization failed");
-    //         response->success = false;
-    //         return;
-    //     }
-
-    //     // Populate the response
-    //     response->success = true;
-    //     response->trajectory = final_trajectory;
-
-    //     RCLCPP_INFO(node_->get_logger(), "Planning and time parameterization succeeded");
-    // }
-
     rclcpp_action::GoalResponse handle_plan_goal(
         const rclcpp_action::GoalUUID &uuid,
         std::shared_ptr<const PlanManipulator::Goal> goal_msg)
