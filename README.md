@@ -1,11 +1,13 @@
 # ManyMove Planner
 
-The `manymove_planner` project provides a robust framework for planning and executing robotic manipulator movements using ROS 2 and MoveIt 2. It supports diverse robots, including the UF850, Panda, and Lite series, with modular, configurable components that cater to various motion planning and execution needs.
+The `manymove_planner` project is meant for roboticists to ease the transition to ROS2 coming from the classic frameworks of major manifacturers.
+It provides a simplified and robust framework for planning and executing robotic manipulator movements using ROS 2 and MoveIt 2. 
+It supports diverse robots, with example configurations of Franka Emika Panda, which is the default demo model for Moveit, and Ufactory Lite6 and UF850.
 
 ## Features
 
 - **Action-Based Motion Control**:
-  - Single move goals with position or Cartesian targets.
+  - Single move goals with joint, position or Cartesian targets.
   - Sequential move goals for executing a series of movements.
 - **Integration with MoveIt 2**:
   - Supports motion planning, Cartesian path planning, and time parameterization.

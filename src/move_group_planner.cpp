@@ -287,61 +287,113 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveGroupPlanner::plan(const 
 
 bool MoveGroupPlanner::executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory)
 {
-    if (!move_group_interface_)
+    // 1) Basic checks
+    if (trajectory.joint_trajectory.points.empty())
     {
-        RCLCPP_ERROR(logger_, "MoveGroupInterface instance not available");
+        RCLCPP_ERROR(logger_, "Received an empty trajectory. Execution aborted.");
         return false;
     }
 
-    // Convert the input trajectory to a MoveGroupInterface plan
-    moveit::planning_interface::MoveGroupInterface::Plan plan;
-    plan.trajectory_ = trajectory;
-
-    // Execute the plan using MoveGroupInterface
-    auto execution_status = move_group_interface_->execute(plan);
-
-    if (execution_status == moveit::core::MoveItErrorCode::SUCCESS)
+    if (!follow_joint_traj_client_)
     {
-        RCLCPP_INFO(logger_, "Trajectory execution succeeded");
-        return true;
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action client not initialized!");
+        return false;
     }
-    else
+
+    // 2) Wait for the action server (optional if you've done it earlier)
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(5)))
     {
-        // Provide a descriptive log message based on the error code
-        std::string status_message;
-        switch (execution_status.val)
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action server not available after waiting.");
+        return false;
+    }
+
+    // 3) Construct the FollowJointTrajectory goal
+    control_msgs::action::FollowJointTrajectory::Goal goal_msg;
+    goal_msg.trajectory = trajectory.joint_trajectory;
+
+    RCLCPP_INFO(logger_, "Sending FollowJointTrajectory goal (MoveGroupPlanner) ...");
+
+    // 4) Make a shared promise to communicate success/failure
+    auto result_promise = std::make_shared<std::promise<bool>>();
+    std::future<bool> result_future = result_promise->get_future();
+
+    // 5) Setup send_goal_options with result callback (and optional feedback)
+    rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SendGoalOptions options;
+
+    // (a) Optional feedback callback
+    options.feedback_callback =
+        [this](auto /*unused_goal_handle*/,
+               const std::shared_ptr<const control_msgs::action::FollowJointTrajectory::Feedback> feedback)
+    {
+        // You can log partial progress or time
+        RCLCPP_DEBUG(logger_, "Partial execution, time_from_start: %.2f",
+                     rclcpp::Duration(feedback->actual.time_from_start).seconds());
+    };
+
+    // (b) Result callback: set the promise
+    options.result_callback =
+        [this, result_promise](const auto &wrapped_result)
+    {
+        bool success = false;
+        switch (wrapped_result.code)
         {
-        case moveit::core::MoveItErrorCode::FAILURE:
-            status_message = "General failure";
+        case rclcpp_action::ResultCode::SUCCEEDED:
+            RCLCPP_INFO(logger_, "FollowJointTrajectory succeeded (MoveGroupPlanner).");
+            success = true;
             break;
-        case moveit::core::MoveItErrorCode::PLANNING_FAILED:
-            status_message = "Planning failed";
+        case rclcpp_action::ResultCode::ABORTED:
+            RCLCPP_ERROR(logger_, "FollowJointTrajectory was aborted.");
+            success = false;
             break;
-        case moveit::core::MoveItErrorCode::INVALID_MOTION_PLAN:
-            status_message = "Invalid motion plan";
-            break;
-        case moveit::core::MoveItErrorCode::MOTION_PLAN_INVALIDATED_BY_ENVIRONMENT_CHANGE:
-            status_message = "Motion plan invalidated by environment change";
-            break;
-        case moveit::core::MoveItErrorCode::CONTROL_FAILED:
-            status_message = "Control failed";
-            break;
-        case moveit::core::MoveItErrorCode::UNABLE_TO_AQUIRE_SENSOR_DATA:
-            status_message = "Unable to acquire sensor data";
-            break;
-        case moveit::core::MoveItErrorCode::TIMED_OUT:
-            status_message = "Timed out";
-            break;
-        case moveit::core::MoveItErrorCode::PREEMPTED:
-            status_message = "Preempted";
+        case rclcpp_action::ResultCode::CANCELED:
+            RCLCPP_WARN(logger_, "FollowJointTrajectory was canceled.");
+            success = false;
             break;
         default:
-            status_message = "Unknown error";
+            RCLCPP_ERROR(logger_, "Unknown result from FollowJointTrajectory.");
+            success = false;
+            break;
         }
+        // fulfill the promise with success/failure
+        result_promise->set_value(success);
+    };
 
-        RCLCPP_ERROR(logger_, "Trajectory execution failed with status: %s", status_message.c_str());
+    // 6) Send the goal asynchronously
+    auto goal_handle_future = follow_joint_traj_client_->async_send_goal(goal_msg, options);
+
+    // 7) Wait for the goal handle
+    if (goal_handle_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Failed to get goal handle from FollowJointTrajectory within 5 seconds.");
         return false;
     }
+    auto goal_handle = goal_handle_future.get();
+    if (!goal_handle)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory goal was rejected by the server.");
+        return false;
+    }
+
+    // 8) Wait for the result asynchronously with the promise (non-spinning)
+    RCLCPP_INFO(logger_, "Waiting for FollowJointTrajectory result (MoveGroupPlanner) ...");
+
+    // We'll allow up to 300s for the motion to complete. Adjust to your needs.
+    auto status = result_future.wait_for(std::chrono::seconds(300));
+    if (status != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution timed out (MoveGroupPlanner).");
+        return false;
+    }
+
+    bool exec_success = result_future.get();
+    if (!exec_success)
+    {
+        RCLCPP_ERROR(logger_, "Trajectory execution failed (MoveGroupPlanner).");
+        return false;
+    }
+
+    RCLCPP_INFO(logger_, "Trajectory execution succeeded (MoveGroupPlanner).");
+    return true;
 }
 
 bool MoveGroupPlanner::executeTrajectoryWithFeedback(

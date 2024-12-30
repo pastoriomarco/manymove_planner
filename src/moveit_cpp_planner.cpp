@@ -16,7 +16,7 @@ MoveItCppPlanner::MoveItCppPlanner(
       traj_controller_(traj_controller)
 {
     moveit_cpp_ptr_ = std::make_shared<moveit_cpp::MoveItCpp>(node_);
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService(); 
+    moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
     // moveit_cpp_ptr_->getPlanningSceneMonitor()->requestPlanningSceneState("get_planning_scene");
     // moveit_cpp_ptr_->getPlanningSceneMonitor()->startSceneMonitor("planning_scene");
     // moveit_cpp_ptr_->getPlanningSceneMonitor()->startWorldGeometryMonitor("attached_collision_object", "planning_scene_world", true);
@@ -477,56 +477,111 @@ bool MoveItCppPlanner::applyTimeParameterization(
     return false;
 }
 
-bool MoveItCppPlanner::executeTrajectory(
-    const moveit_msgs::msg::RobotTrajectory &trajectory)
+bool MoveItCppPlanner::executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory)
 {
-    // Ensure the MoveItCpp instance is ready
-    if (!moveit_cpp_ptr_)
-    {
-        RCLCPP_ERROR(logger_, "MoveItCpp instance not available");
-        return false;
-    }
-
-    // Ensure trajectory is not empty
+    // 1) Basic checks
     if (trajectory.joint_trajectory.points.empty())
     {
-        RCLCPP_ERROR(logger_, "Trajectory has no points to execute");
+        RCLCPP_ERROR(logger_, "Empty trajectory, aborting (MoveItCppPlanner).");
         return false;
     }
 
-    // Convert the input trajectory to a RobotTrajectoryPtr
-    auto robot_trajectory_ptr = std::make_shared<robot_trajectory::RobotTrajectory>(
-        moveit_cpp_ptr_->getRobotModel(), planning_group_);
-    robot_trajectory_ptr->setRobotTrajectoryMsg(*moveit_cpp_ptr_->getCurrentState(), trajectory);
+    if (!follow_joint_traj_client_)
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory action client not initialized! (MoveItCppPlanner)");
+        return false;
+    }
 
-    // Execute trajectory using MoveItCpp
-    auto status = moveit_cpp_ptr_->execute(planning_group_, robot_trajectory_ptr, true);
+    // 2) Optionally wait for server
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(5)))
+    {
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory server not available (MoveItCppPlanner).");
+        return false;
+    }
 
-    if (status == moveit_controller_manager::ExecutionStatus::SUCCEEDED)
+    // 3) Create goal
+    control_msgs::action::FollowJointTrajectory::Goal goal_msg;
+    goal_msg.trajectory = trajectory.joint_trajectory;
+
+    RCLCPP_INFO(logger_, "Sending FollowJointTrajectory goal (MoveItCppPlanner) ...");
+
+    // 4) Prepare promise/future
+    auto result_promise = std::make_shared<std::promise<bool>>();
+    std::future<bool> result_future = result_promise->get_future();
+
+    // 5) SendGoalOptions
+    rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SendGoalOptions options;
+
+    // (a) Optional feedback
+    options.feedback_callback =
+        [this](auto, auto feedback)
     {
-        RCLCPP_INFO(logger_, "Trajectory execution succeeded");
-        return true;
-    }
-    else if (status == moveit_controller_manager::ExecutionStatus::FAILED)
+        RCLCPP_DEBUG(logger_, "Partial execution (MoveItCppPlanner): time_from_start %.2f",
+                     rclcpp::Duration(feedback->actual.time_from_start).seconds());
+    };
+
+    // (b) Result callback
+    options.result_callback =
+        [this, result_promise](const auto &wrapped_result)
     {
-        RCLCPP_ERROR(logger_, "Trajectory execution failed");
+        bool success = false;
+        switch (wrapped_result.code)
+        {
+        case rclcpp_action::ResultCode::SUCCEEDED:
+            RCLCPP_INFO(logger_, "FollowJointTrajectory succeeded (MoveItCppPlanner).");
+            success = true;
+            break;
+        case rclcpp_action::ResultCode::ABORTED:
+            RCLCPP_ERROR(logger_, "FollowJointTrajectory was aborted (MoveItCppPlanner).");
+            success = false;
+            break;
+        case rclcpp_action::ResultCode::CANCELED:
+            RCLCPP_WARN(logger_, "FollowJointTrajectory canceled (MoveItCppPlanner).");
+            success = false;
+            break;
+        default:
+            RCLCPP_ERROR(logger_, "Unknown result from FollowJointTrajectory (MoveItCppPlanner).");
+            success = false;
+            break;
+        }
+        result_promise->set_value(success);
+    };
+
+    // 6) Send the goal
+    auto goal_handle_future = follow_joint_traj_client_->async_send_goal(goal_msg, options);
+
+    // 7) Wait for the goal handle
+    if (goal_handle_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Goal handle not received in time (MoveItCppPlanner).");
         return false;
     }
-    else if (status == moveit_controller_manager::ExecutionStatus::PREEMPTED)
+
+    auto goal_handle = goal_handle_future.get();
+    if (!goal_handle)
     {
-        RCLCPP_ERROR(logger_, "Trajectory execution was preempted");
+        RCLCPP_ERROR(logger_, "FollowJointTrajectory goal rejected (MoveItCppPlanner).");
         return false;
     }
-    else if (status == moveit_controller_manager::ExecutionStatus::TIMED_OUT)
+
+    // 8) Wait for result via future
+    RCLCPP_INFO(logger_, "Waiting for FollowJointTrajectory result (MoveItCppPlanner) ...");
+    auto status = result_future.wait_for(std::chrono::seconds(300));
+    if (status != std::future_status::ready)
     {
-        RCLCPP_ERROR(logger_, "Trajectory execution timed out");
+        RCLCPP_ERROR(logger_, "Trajectory execution timed out (MoveItCppPlanner).");
         return false;
     }
-    else
+
+    bool exec_success = result_future.get();
+    if (!exec_success)
     {
-        RCLCPP_ERROR(logger_, "Trajectory execution failed with an unknown status");
+        RCLCPP_ERROR(logger_, "Trajectory execution failed (MoveItCppPlanner).");
         return false;
     }
+
+    RCLCPP_INFO(logger_, "Trajectory execution succeeded (MoveItCppPlanner).");
+    return true;
 }
 
 bool MoveItCppPlanner::executeTrajectoryWithFeedback(
