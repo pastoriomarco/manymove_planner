@@ -17,12 +17,12 @@ MoveItCppPlanner::MoveItCppPlanner(
 {
     moveit_cpp_ptr_ = std::make_shared<moveit_cpp::MoveItCpp>(node_);
     moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
-    // moveit_cpp_ptr_->getPlanningSceneMonitor()->requestPlanningSceneState("get_planning_scene");
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->startSceneMonitor();
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->startStateMonitor();
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->startWorldGeometryMonitor("/collision_object", "/attached_collision_object", true);
-    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startPublishingPlanningScene(planning_scene_monitor::PlanningSceneMonitor::SceneUpdateType::UPDATE_GEOMETRY);
-    moveit_cpp_ptr_->getPlanningSceneMonitor()->monitorDiffs(true);
+    // // moveit_cpp_ptr_->getPlanningSceneMonitor()->requestPlanningSceneState("get_planning_scene");
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startSceneMonitor();
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startStateMonitor();
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->startWorldGeometryMonitor("/collision_object", "/attached_collision_object", true);
+    // // moveit_cpp_ptr_->getPlanningSceneMonitor()->startPublishingPlanningScene(planning_scene_monitor::PlanningSceneMonitor::SceneUpdateType::UPDATE_GEOMETRY);
+    // moveit_cpp_ptr_->getPlanningSceneMonitor()->monitorDiffs(true);
 
     planning_components_ = std::make_shared<moveit_cpp::PlanningComponent>(planning_group_, moveit_cpp_ptr_);
     RCLCPP_INFO(logger_, "===================================================");
