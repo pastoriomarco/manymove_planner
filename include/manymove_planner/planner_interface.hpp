@@ -15,12 +15,14 @@
 
 /**
  * @class PlannerInterface
- * @brief Abstract interface for motion planners.
+ * @brief Abstract interface for motion planners in the manymove_planner package.
  *
- * This class defines the essential functions that any motion planner of manymove_planner package must implement,
- * including methods for planning, execution, and time parametrization.
+ * This class defines the essential functions that any motion planner in the
+ * manymove_planner package must implement. It includes methods for planning,
+ * execution, and time parameterization of trajectories.
  */
-class PlannerInterface {
+class PlannerInterface
+{
 public:
     /**
      * @brief Virtual destructor for PlannerInterface.
@@ -28,32 +30,32 @@ public:
     virtual ~PlannerInterface() = default;
 
     /**
-     * @brief Plan a trajectory to achieve a specific goal.
+     * @brief Plan a trajectory to achieve a specified goal.
      * @param goal The target goal for the manipulator.
-     * @return A pair containing a success flag and the planned robot trajectory.
+     * @return A pair containing a success flag (true if planning succeeded) and the planned robot trajectory.
      */
     virtual std::pair<bool, moveit_msgs::msg::RobotTrajectory> plan(const manymove_planner::action::MoveManipulator::Goal &goal) = 0;
 
     /**
      * @brief Plan a sequence of trajectories to achieve multiple goals.
-     * @param sequence_goal A sequence of goals for the manipulator.
-     * @return A pair containing the planned trajectories and the associated movement configurations.
+     * @param sequence_goal The sequence of goals for the manipulator.
+     * @return A pair containing a vector of planned trajectories and a vector of the associated movement configurations.
      */
     virtual std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
         const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal) = 0;
 
     /**
-     * @brief Execute a given trajectory.
+     * @brief Execute a given trajectory on the manipulator.
      * @param trajectory The trajectory to execute.
      * @return True if execution was successful, false otherwise.
      */
     virtual bool executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory) = 0;
 
     /**
-     * @brief Execute a given trajectory while providing feedback to the action server.
+     * @brief Execute a given trajectory while providing feedback to an action server.
      * @param trajectory The trajectory to execute.
-     * @param sizes A vector containing the sizes of each segment in the trajectory.
-     * @param goal_handle The goal handle for the action server.
+     * @param sizes A vector containing the sizes (number of points) of each segment in the trajectory.
+     * @param goal_handle The goal handle for the action server, used to provide feedback.
      * @return True if execution was successful, false otherwise.
      */
     virtual bool executeTrajectoryWithFeedback(
@@ -63,19 +65,19 @@ public:
 
     /**
      * @brief Apply time parameterization to a sequence of trajectories.
-     * @param trajectories The input trajectories.
-     * @param configs The movement configurations for each trajectory.
-     * @param sizes Output sizes of each trajectory segment.
-     * @return A pair containing a success flag and the time-parameterized trajectory.
+     * @param trajectories The input trajectories to be time-parameterized.
+     * @param configs The movement configurations (e.g., velocity and acceleration scaling) for each trajectory.
+     * @param sizes Output vector indicating the number of points (or segments) for each trajectory within the time-parameterized result.
+     * @return A pair containing a success flag (true if parameterization succeeded) and the combined time-parameterized trajectory.
      */
     virtual std::pair<bool, moveit_msgs::msg::RobotTrajectory> applyTimeParametrizationSequence(
-        const std::vector<moveit_msgs::msg::RobotTrajectory>& trajectories,
-        const std::vector<manymove_planner::msg::MovementConfig>& configs,
-        std::vector<size_t>& sizes) = 0;
+        const std::vector<moveit_msgs::msg::RobotTrajectory> &trajectories,
+        const std::vector<manymove_planner::msg::MovementConfig> &configs,
+        std::vector<size_t> &sizes) = 0;
 
 protected:
     /**
-     * @brief Protected constructor to prevent direct instantiation.
+     * @brief Protected constructor to prevent direct instantiation of the interface.
      */
     PlannerInterface() = default;
 };
