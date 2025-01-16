@@ -14,7 +14,7 @@ MoveGroupPlanner::MoveGroupPlanner(
 {
     // Initialize MoveGroupInterface with the shared node
     move_group_interface_ = std::make_shared<moveit::planning_interface::MoveGroupInterface>(node_, planning_group_);
-    move_group_interface_->setPlanningTime(5.0);
+    move_group_interface_->setPlanningTime(0.5);
 
     RCLCPP_INFO(logger_, "MoveGroupPlanner initialized with group: %s", planning_group_.c_str());
 
