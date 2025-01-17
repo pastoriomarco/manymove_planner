@@ -123,6 +123,37 @@ private:
     double computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const;
 
     /**
+     * @brief Calculate the pose relative to a frame from a robot state.
+     * @param robot_state The robot state to get the joint positions from.
+     * @param link_frame The reference frame to calculate the pose from the joint positions of the robot state.
+     * @return The computed distance between the two poses.
+     */
+    geometry_msgs::msg::Pose getPoseFromRobotState(const moveit::core::RobotState &robot_state,
+                                                   const std::string &link_frame);
+
+    /**
+     * @brief Compute the euclidean distance between two poses.
+     * @param start_pose The start pose to calculate the distance from.
+     * @param target_pose The target pose to calculate the distance to.
+     * @return The computed distance between the two poses.
+     */
+    double computeCartesianDistance(const geometry_msgs::msg::Pose &start_pose,
+                                    const geometry_msgs::msg::Pose &target_pose);
+
+    /**
+     * @brief Calculate the pose relative to a frame from the first or the last point of a trajectory.
+     * @param traj_msg The trajectory from which to get the point to calculate from.
+     * @param robot_state Contains the info about the robot to calculate the pose.
+     * @param link_frame The reference frame to calculate the pose.
+     * @param use_last_point If true it uses the last point of the trajectory, if false the first point.
+     * @return The computed distance between the two poses.
+     */
+    geometry_msgs::msg::Pose getPoseFromTrajectory(const moveit_msgs::msg::RobotTrajectory &traj_msg,
+                                                   const moveit::core::RobotState &robot_state,
+                                                   const std::string &link_frame,
+                                                   bool use_last_point = true);
+
+    /**
      * @brief Compute the maximum Cartesian speed found in a trajectory.
      * @param trajectory A pointer to the robot trajectory object.
      * @return The maximum Cartesian speed (m/s) found in the trajectory.

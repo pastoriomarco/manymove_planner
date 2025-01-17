@@ -141,6 +141,84 @@ double MoveItCppPlanner::computePathLength(const moveit_msgs::msg::RobotTrajecto
 
     return total_length;
 }
+
+// Function to get a geometry_msgs::msg::Pose from a RobotState and frame
+geometry_msgs::msg::Pose MoveItCppPlanner::getPoseFromRobotState(const moveit::core::RobotState &robot_state,
+                                                                 const std::string &link_frame)
+{
+
+    // Clone the state to ensure the original state isn't modified
+    moveit::core::RobotState state(robot_state);
+
+    // Update link transforms to ensure they are valid
+    state.updateLinkTransforms();
+
+    geometry_msgs::msg::Pose pose;
+
+    // Get the transform of the frame
+    const Eigen::Isometry3d &pose_eigen = state.getGlobalLinkTransform(link_frame);
+
+    // Extract position
+    pose.position.x = pose_eigen.translation().x();
+    pose.position.y = pose_eigen.translation().y();
+    pose.position.z = pose_eigen.translation().z();
+
+    // Extract orientation as a quaternion
+    Eigen::Quaterniond quat(pose_eigen.rotation());
+    pose.orientation.x = quat.x();
+    pose.orientation.y = quat.y();
+    pose.orientation.z = quat.z();
+    pose.orientation.w = quat.w();
+
+    return pose;
+}
+
+// Function to compute the Euclidean distance between the start pose and the target pose
+double MoveItCppPlanner::computeCartesianDistance(const geometry_msgs::msg::Pose &start_pose,
+                                                  const geometry_msgs::msg::Pose &target_pose)
+{
+    // Compute the Euclidean distance to the target pose
+    double dx = target_pose.position.x - start_pose.position.x;
+    double dy = target_pose.position.y - start_pose.position.y;
+    double dz = target_pose.position.z - start_pose.position.z;
+
+    return std::sqrt(dx * dx + dy * dy + dz * dz);
+}
+
+// Function to get a pose from a trajectory and TCP frame
+geometry_msgs::msg::Pose MoveItCppPlanner::getPoseFromTrajectory(const moveit_msgs::msg::RobotTrajectory &traj_msg,
+                                                                 const moveit::core::RobotState &robot_state,
+                                                                 const std::string &link_frame,
+                                                                 bool use_last_point)
+{
+    geometry_msgs::msg::Pose pose;
+
+    // Ensure the trajectory is not empty
+    if (traj_msg.joint_trajectory.points.empty())
+    {
+        throw std::runtime_error("Trajectory is empty, cannot extract pose.");
+    }
+
+    // Select the point to use (first or last)
+    const auto &point = use_last_point ? traj_msg.joint_trajectory.points.back() : traj_msg.joint_trajectory.points.front();
+    const auto &joint_names = traj_msg.joint_trajectory.joint_names;
+    std::vector<double> joint_positions(point.positions.begin(), point.positions.end());
+
+    // Clone the robot state to avoid modifying the original
+    moveit::core::RobotState state(robot_state);
+
+    // Update link transforms to ensure they are valid
+    state.updateLinkTransforms();
+
+    // Set the joint positions in the cloned state
+    state.setVariablePositions(joint_names, joint_positions);
+
+    // Get the pose of the TCP frame
+    pose = getPoseFromRobotState(state, link_frame);
+
+    return pose;
+}
+
 // Compute Max Cartesian Speed
 double MoveItCppPlanner::computeMaxCartesianSpeed(const robot_trajectory::RobotTrajectoryPtr &trajectory) const
 {
@@ -192,7 +270,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
 {
     std::vector<std::pair<moveit_msgs::msg::RobotTrajectory, double>> trajectories;
     auto robot_model_ptr = moveit_cpp_ptr_->getRobotModel();
-    auto robot_start_state = planning_components_->getStartState();
+    auto robot_start_state_ptr = planning_components_->getStartState();
     auto joint_model_group_ptr = robot_model_ptr->getJointModelGroup(planning_group_);
 
     // Handle start state
@@ -267,23 +345,67 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
                static_cast<int>(trajectories.size()) < goal_msg.goal.config.plan_number_target)
         {
 
-            auto target_state = *robot_start_state;
+            auto target_state = *robot_start_state_ptr;
             target_state.setFromIK(joint_model_group_ptr, goal_msg.goal.pose_target);
             planning_components_->setGoal(target_state);
 
             auto solution = planning_components_->plan();
-            if (solution)
+
+            if (solution && solution.error_code == moveit::core::MoveItErrorCode::SUCCESS)
             {
                 moveit_msgs::msg::RobotTrajectory traj_msg;
                 solution.trajectory->getRobotTrajectoryMsg(traj_msg);
                 double length = computePathLength(traj_msg);
-                trajectories.emplace_back(traj_msg, length);
-                RCLCPP_INFO_STREAM(logger_, "Calculated traj length: " << length);
+
+                if (traj_msg.joint_trajectory.points.empty())
+                {
+                    RCLCPP_WARN(logger_, "%s target planning attempt %d failed: trajectory is empty.",
+                                goal_msg.goal.movement_type.c_str(), attempts + 1);
+                    break; // the traj is empty
+                }
+
+                // I'm having trouble with plans succeeding with empty or almost empty trajectories
+                // The following checks are to verify that the trajectory makes sense
+
+                // auto start_pose = getPoseFromRobotState(*robot_start_state_ptr, tcp_frame_);
+                // auto traj_start_pose = getPoseFromTrajectory(traj_msg, *robot_start_state_ptr, tcp_frame_, false);
+                auto traj_end_pose = getPoseFromTrajectory(traj_msg, *robot_start_state_ptr, tcp_frame_, true);
+
+                // double min_euclidean_distance = computeCartesianDistance(start_pose, goal_msg.goal.pose_target);
+                // double traj_euclidean_distance = computeCartesianDistance(traj_start_pose, traj_end_pose);
+                // double starts_euclidean_distance = computeCartesianDistance(start_pose, traj_start_pose);
+                double targets_euclidean_distance = computeCartesianDistance(traj_end_pose, goal_msg.goal.pose_target);
+
+                // RCLCPP_INFO_STREAM(logger_, "Minimum theoretical eclidean distance between start pose and target pose: " << min_euclidean_distance);
+                // RCLCPP_INFO_STREAM(logger_, "Euclidean distance between trajectory first point and trajectory last point: " << traj_euclidean_distance);
+                // RCLCPP_INFO_STREAM(logger_, "Eclidean distance between theoretical start and calculated trajectory first point: " << starts_euclidean_distance);
+
+                double traj_tolerance = 0.001;
+
+                if (targets_euclidean_distance < traj_tolerance)
+                {
+
+                    trajectories.emplace_back(traj_msg, length);
+                    RCLCPP_INFO_STREAM(logger_, "Calculated pose traj length: " << length);
+                    RCLCPP_INFO(logger_, "moveit::core::MoveItErrorCode = %d.",
+                                solution.error_code.val);
+                }
+                else
+                {
+                    RCLCPP_WARN_STREAM(logger_, "Eclidean distance between theoretical target and calculated trajectory last point: " << targets_euclidean_distance);
+
+                    RCLCPP_WARN_STREAM(logger_, "The planner was not able to calculate trajectory with end point within tolerance." << targets_euclidean_distance);
+                    RCLCPP_WARN(logger_, "%s target planning attempt %d failed: trajectory is empty.",
+                                goal_msg.goal.movement_type.c_str(), attempts + 1);
+                    break;
+                }
             }
             else
             {
                 RCLCPP_WARN(logger_, "%s target planning attempt %d failed.",
                             goal_msg.goal.movement_type.c_str(), attempts + 1);
+                RCLCPP_WARN(logger_, "moveit::core::MoveItErrorCode = %d.",
+                            solution.error_code.val);
             }
             attempts++;
         }
