@@ -456,7 +456,22 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
 
             std::vector<moveit::core::RobotStatePtr> trajectory_states;
 
-            // Use the waypoint-based overload
+            // // Use the waypoint-based overload
+            // double fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
+            //     start_state.get(),
+            //     joint_model_group_ptr,
+            //     trajectory_states,
+            //     ee_link,
+            //     eigen_waypoints,
+            //     true,
+            //     moveit::core::MaxEEFStep(goal_msg.goal.config.step_size),
+            //     moveit::core::JumpThreshold(goal_msg.goal.config.jump_threshold),
+            //     moveit::core::GroupStateValidityCallbackFn(),
+            //     kinematics::KinematicsQueryOptions(),
+            //     nullptr);
+            moveit::core::GroupStateValidityCallbackFn custom_callback =
+                std::bind(&MoveItCppPlanner::isStateValid, this, std::placeholders::_1, std::placeholders::_2);
+
             double fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
                 start_state.get(),
                 joint_model_group_ptr,
@@ -466,7 +481,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
                 true,
                 moveit::core::MaxEEFStep(goal_msg.goal.config.step_size),
                 moveit::core::JumpThreshold(goal_msg.goal.config.jump_threshold),
-                moveit::core::GroupStateValidityCallbackFn(),
+                custom_callback,
                 kinematics::KinematicsQueryOptions(),
                 nullptr);
 
@@ -1122,4 +1137,52 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
 
     RCLCPP_INFO(logger_, "Successfully planned sequence with %zu steps.", planned_trajectories.size());
     return {planned_trajectories, planned_configs};
+}
+
+bool MoveItCppPlanner::isStateValid(const moveit::core::RobotState *state,
+                                    const moveit::core::JointModelGroup *group)
+{
+    // 1. Set up collision request & result
+    collision_detection::CollisionRequest collision_request;
+    collision_detection::CollisionResult collision_result;
+
+    // Enable contact checks (if you need detailed contact info)
+    collision_request.contacts = true;
+    collision_request.max_contacts = 10;
+
+    // **Key Line**: Limit collision checks to the JointModelGroup
+    collision_request.group_name = group->getName();
+
+    // 2. Access the planning scene via the PlanningSceneMonitor
+    auto psm = moveit_cpp_ptr_->getPlanningSceneMonitor();
+    if (!psm)
+    {
+        RCLCPP_ERROR(logger_, "PlanningSceneMonitor is null. Cannot perform collision checking.");
+        return false;
+    }
+
+    planning_scene_monitor::LockedPlanningSceneRO locked_scene(psm);
+    if (!locked_scene)
+    {
+        RCLCPP_ERROR(logger_, "LockedPlanningSceneRO is null. Cannot perform collision checking.");
+        return false;
+    }
+
+    // 3. Clone the given RobotState to update transforms if needed
+    moveit::core::RobotState temp_state(*state);
+    // Make sure transforms in temp_state are up-to-date
+    temp_state.update(); // or temp_state.updateLinkTransforms();
+
+    // 4. Perform the collision check
+    locked_scene->checkCollision(collision_request, collision_result, temp_state);
+
+    // 5. Log if a collision is detected
+    if (collision_result.collision)
+    {
+        RCLCPP_WARN(logger_, "Collision detected in custom validity callback for group '%s'.",
+                    group->getName().c_str());
+    }
+
+    // Return true if no collision, false otherwise
+    return !collision_result.collision;
 }

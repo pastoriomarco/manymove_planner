@@ -184,6 +184,8 @@ private:
      */
     moveit_msgs::msg::RobotTrajectory convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const;
 
+    bool isStateValid(const moveit::core::RobotState *state, const moveit::core::JointModelGroup *group);
+
     rclcpp::Node::SharedPtr node_; ///< Shared pointer to the ROS2 node.
     rclcpp::Logger logger_;        ///< Logger instance for logging messages.
     std::string planning_group_;   ///< Name of the planning group.
