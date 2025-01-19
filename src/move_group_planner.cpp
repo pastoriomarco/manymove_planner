@@ -785,3 +785,88 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveGroupPlanner::applyTimePa
     RCLCPP_INFO(logger_, "Successfully applied time parametrization sequence over %zu segments.", trajectories.size());
     return {true, concatenated};
 }
+
+bool MoveGroupPlanner::sendControlledStop(double deceleration_time)
+{
+    RCLCPP_INFO(logger_, "Constructing a short 'controlled stop' trajectory (%.2fs).",
+                deceleration_time);
+
+    // Ensure the FollowJointTrajectory action server is available
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(2)))
+    {
+        RCLCPP_ERROR(logger_, "Cannot send stop trajectory, FollowJointTrajectory server is not available.");
+        return false;
+    }
+
+    // Get the current joint positions and velocities
+    std::vector<double> positions = move_group_interface_->getCurrentJointValues();
+    if (positions.empty())
+    {
+        RCLCPP_ERROR(logger_, "Failed to retrieve current joint values.");
+        return false;
+    }
+
+    // Current joint velocities are not directly accessible via MoveGroupInterface.
+    // We'll assume zero velocities for safety.
+    std::vector<double> velocities(positions.size(), 0.0);
+
+    // Build a controlled stop trajectory
+    control_msgs::action::FollowJointTrajectory::Goal stop_goal;
+    stop_goal.trajectory.joint_names = move_group_interface_->getJointNames();
+
+    // Point 1: Current position, zero velocity
+    trajectory_msgs::msg::JointTrajectoryPoint p0;
+    p0.positions = positions;
+    p0.velocities = velocities; // Assume 0 if unavailable
+    p0.accelerations.resize(positions.size(), 0.0);
+    p0.time_from_start = rclcpp::Duration(0, 0); // at time=0
+
+    // Point 2: Same position, zero velocity
+    trajectory_msgs::msg::JointTrajectoryPoint p1 = p0;
+    p1.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
+
+    stop_goal.trajectory.points.push_back(p0);
+    stop_goal.trajectory.points.push_back(p1);
+
+    // Send the stop goal to the FollowJointTrajectory action server
+    RCLCPP_INFO(logger_, "Sending 'controlled stop' trajectory with 2 points.");
+
+    auto send_goal_future = follow_joint_traj_client_->async_send_goal(stop_goal);
+    if (send_goal_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Timeout while sending stop trajectory goal.");
+        return false;
+    }
+
+    auto goal_handle = send_goal_future.get();
+    if (!goal_handle)
+    {
+        RCLCPP_ERROR(logger_, "Stop trajectory goal was rejected by the controller.");
+        return false;
+    }
+
+    // Wait for the result (optional but recommended to confirm execution)
+    auto result_future = follow_joint_traj_client_->async_get_result(goal_handle);
+
+    if (result_future.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Controlled stop goal did not finish before timeout.");
+        return false;
+    }
+    auto wrapped_result = result_future.get();
+    switch (wrapped_result.code)
+    {
+    case rclcpp_action::ResultCode::SUCCEEDED:
+        RCLCPP_INFO(logger_, "Controlled stop completed successfully.");
+        return true;
+    case rclcpp_action::ResultCode::ABORTED:
+        RCLCPP_ERROR(logger_, "Stop goal was aborted by the controller.");
+        return false;
+    case rclcpp_action::ResultCode::CANCELED:
+        RCLCPP_WARN(logger_, "Stop goal was canceled by the controller.");
+        return false;
+    default:
+        RCLCPP_ERROR(logger_, "Stop goal ended with unknown result code %d.", (int)wrapped_result.code);
+        return false;
+    }
+}

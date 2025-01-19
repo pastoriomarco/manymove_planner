@@ -133,6 +133,16 @@ public:
         const std::vector<manymove_planner::msg::MovementConfig> &configs,
         std::vector<size_t> &sizes) override;
 
+    /**
+     * @brief Send a short trajectory to the FollowJointTrajectory controller that decelerates
+     *        the robot to zero velocity from its current state.
+     *
+     * @param deceleration_time seconds over which to ramp velocities down to 0
+     * @return true if the goal was sent and completed successfully
+     * @return false if something failed
+     */
+    bool sendControlledStop(double deceleration_time = 1.0);
+
 private:
     /**
      * @brief Compute the total path length of a given trajectory.
@@ -193,17 +203,17 @@ private:
      * @param trajectory Pointer to a RobotTrajectory to parameterize.
      * @param config The movement configuration specifying velocity/acceleration factors, etc.
      * @return True if the time parameterization succeeded, false otherwise.
-     * 
+     *
      * @details Most of the industrial and collaborative robots have a maximum cartesian speed over which the robot will perform
      * and emergency stop. Moreover, safety regulations in collaborative applications require the enforcement of maximum cartesian
-     * speed limits. While this package is not meant to provide functionalities compliant with safety regulations, most robots 
+     * speed limits. While this package is not meant to provide functionalities compliant with safety regulations, most robots
      * will come with such functionalities from factory, and they can't (or shouldn't) be overruled or removed.
-     * This function not only applies the time parametrization required for the trajectory to be executed with a smooth motion, 
-     * but also reduces the velocity scaling if the calculated cartesian speed at any segment of the trajectory exceeds the 
+     * This function not only applies the time parametrization required for the trajectory to be executed with a smooth motion,
+     * but also reduces the velocity scaling if the calculated cartesian speed at any segment of the trajectory exceeds the
      * cartesian limit set on the @p config parameter. Currently this function only limits the velocity scaling factor, not the
-     * acceleration scaling factor: this allows for faster movements as the acceleration is not reduced together with the 
+     * acceleration scaling factor: this allows for faster movements as the acceleration is not reduced together with the
      * velocity, but try to keep velocities and accelerations coherent with the cartesian speed you want to obtain. Having really
-     * slow moves with high accelerations may cause jerky and instable moves, so when you set the @p config param always try to 
+     * slow moves with high accelerations may cause jerky and instable moves, so when you set the @p config param always try to
      * keep the velocity and acceleration scaling factors coherent with the maximum cartesian speed you set.
      */
     bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);

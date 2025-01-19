@@ -297,8 +297,8 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
      * params.planning_pipeline = "ompl"; // or the name of your pipeline from your moveit_cpp.yaml
      * params.max_velocity_scaling_factor = goal_msg.goal.config.velocity_scaling_factor;
      * params.max_acceleration_scaling_factor = goal_msg.goal.config.acceleration_scaling_factor;
-     * IMPORTANT NOTE: You can set other parameters in `params` as needed, but remember that if you 
-     * set even one parameter you will have to set all of them. When I last tried, setting one 
+     * IMPORTANT NOTE: You can set other parameters in `params` as needed, but remember that if you
+     * set even one parameter you will have to set all of them. When I last tried, setting one
      * parameter had as consequence that none of the default parameters is used anymore.
      */
 
@@ -1195,4 +1195,109 @@ bool MoveItCppPlanner::isStateValid(const moveit::core::RobotState *state,
 
     // Return true if no collision, false otherwise
     return !collision_result.collision;
+}
+
+bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
+{
+    RCLCPP_INFO(logger_, "Constructing a short 'controlled stop' trajectory (%.2fs).",
+                deceleration_time);
+
+    // 1) Make sure the FollowJointTrajectory action server is up
+    if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(2)))
+    {
+        RCLCPP_ERROR(logger_, "Cannot send stop trajectory, FollowJointTrajectory server is not available.");
+        return false;
+    }
+
+    // 2) Get current joint positions from MoveIt
+    //    This won't have live joint velocities unless you have a real robot or a sim that
+    //    publishes them. If velocities are not available, we might approximate them as zero.
+    auto current_state = moveit_cpp_ptr_->getCurrentState();
+    if (!current_state)
+    {
+        RCLCPP_ERROR(logger_, "Failed to get current robot state for stop trajectory.");
+        return false;
+    }
+
+    const auto &joint_model_group = current_state->getJointModelGroup(planning_group_);
+    if (!joint_model_group)
+    {
+        RCLCPP_ERROR(logger_, "JointModelGroup '%s' not found.", planning_group_.c_str());
+        return false;
+    }
+
+    // The robot model tells us which joints we care about
+    const std::vector<std::string> &joint_names = joint_model_group->getVariableNames();
+
+    // Extract current joint positions
+    std::vector<double> positions;
+    current_state->copyJointGroupPositions(joint_model_group, positions);
+
+    // (Optional) Extract approximate velocities from the JointGroup
+    // MoveIt core might not know real velocities unless you feed them in.
+    // We'll just do zeros for safety:
+    std::vector<double> velocities(positions.size(), 0.0);
+
+    // 3) Build a 2-point trajectory
+    control_msgs::action::FollowJointTrajectory::Goal stop_goal;
+    stop_goal.trajectory.joint_names = joint_names;
+
+    // Point 1: current position, current velocity
+    trajectory_msgs::msg::JointTrajectoryPoint p0;
+    p0.positions = positions;
+    p0.velocities = velocities; // might be 0 if not known
+    p0.accelerations.resize(positions.size(), 0.0);
+    p0.time_from_start = rclcpp::Duration(0, 0); // at time=0
+
+    // Point 2: same position or a small difference, but zero velocity
+    // Use deceleration_time seconds to ramp down.
+    trajectory_msgs::msg::JointTrajectoryPoint p1;
+    p1.positions = positions;
+    p1.velocities.resize(positions.size(), 0.0);
+    p1.accelerations.resize(positions.size(), 0.0);
+    p1.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
+
+    stop_goal.trajectory.points.push_back(p0);
+    stop_goal.trajectory.points.push_back(p1);
+
+    // 4) Send the new "stop" goal and optionally wait for result
+    RCLCPP_INFO(logger_, "Sending 'controlled stop' trajectory with 2 points.");
+
+    auto send_goal_future = follow_joint_traj_client_->async_send_goal(stop_goal);
+    if (send_goal_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Timeout while sending stop trajectory goal.");
+        return false;
+    }
+    auto goal_handle = send_goal_future.get();
+    if (!goal_handle)
+    {
+        RCLCPP_ERROR(logger_, "Stop trajectory goal was rejected by the joint trajectory server.");
+        return false;
+    }
+
+    // Wait for the result (optional, but let's do it to confirm it executes)
+    auto result_future = follow_joint_traj_client_->async_get_result(goal_handle);
+
+    if (result_future.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
+    {
+        RCLCPP_ERROR(logger_, "Controlled stop goal did not finish before timeout.");
+        return false;
+    }
+    auto wrapped_result = result_future.get();
+    switch (wrapped_result.code)
+    {
+    case rclcpp_action::ResultCode::SUCCEEDED:
+        RCLCPP_INFO(logger_, "Controlled stop completed successfully.");
+        return true;
+    case rclcpp_action::ResultCode::ABORTED:
+        RCLCPP_ERROR(logger_, "Stop goal was aborted by the controller.");
+        return false;
+    case rclcpp_action::ResultCode::CANCELED:
+        RCLCPP_WARN(logger_, "Stop goal was canceled by the controller.");
+        return false;
+    default:
+        RCLCPP_ERROR(logger_, "Stop goal ended with unknown result code %d.", (int)wrapped_result.code);
+        return false;
+    }
 }

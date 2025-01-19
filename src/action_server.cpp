@@ -51,6 +51,17 @@ public:
             std::bind(&MoveManipulatorActionServer::handle_execute_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_execute_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_execute_accepted, this, std::placeholders::_1));
+
+        /**
+         * This action server was created to receive stop commands if the robot needs a relatively controlled stop.
+         * Still under construction.
+         */
+        stop_motion_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
+            node_,
+            "stop_motion",
+            std::bind(&MoveManipulatorActionServer::handle_stop_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&MoveManipulatorActionServer::handle_stop_cancel, this, std::placeholders::_1),
+            std::bind(&MoveManipulatorActionServer::handle_stop_accept, this, std::placeholders::_1));
     }
 
 private:
@@ -62,6 +73,7 @@ private:
 
     rclcpp_action::Server<PlanManipulator>::SharedPtr plan_action_server_;
     rclcpp_action::Server<ExecuteTrajectory>::SharedPtr execute_action_server_;
+    rclcpp_action::Server<ExecuteTrajectory>::SharedPtr stop_motion_server_;
 
     rclcpp_action::GoalResponse handle_single_goal(
         const rclcpp_action::GoalUUID &uuid,
@@ -331,6 +343,76 @@ private:
             RCLCPP_ERROR(node_->get_logger(), "Trajectory execution failed");
             result->success = false;
             result->message = "Trajectory execution failed";
+            goal_handle->abort(result);
+        }
+    }
+
+    // StopMotion callbacks:
+    rclcpp_action::GoalResponse handle_stop_goal(
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
+        [[maybe_unused]] std::shared_ptr<const ExecuteTrajectory::Goal> goal)
+    {
+        RCLCPP_INFO(node_->get_logger(), "[ExecuteTrajectory] Received request to STOP");
+        // Always accept the request:
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
+
+    rclcpp_action::CancelResponse handle_stop_cancel(
+        [[maybe_unused]] const std::shared_ptr<GoalHandleExecuteTrajectory> goal_handle)
+    {
+        RCLCPP_INFO(node_->get_logger(), "[ExecuteTrajectory] Received request to cancel STOP motion");
+        // Typically we just accept the cancel, though there's not much sense in "canceling a stop."
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
+
+    void handle_stop_accept(const std::shared_ptr<GoalHandleExecuteTrajectory> goal_handle)
+    {
+        // Execute in a separate thread so as not to block the executor
+        std::thread{std::bind(&MoveManipulatorActionServer::execute_stop, this, goal_handle)}.detach();
+    }
+
+    void execute_stop(const std::shared_ptr<GoalHandleExecuteTrajectory> goal_handle)
+    {
+        RCLCPP_INFO(node_->get_logger(), "[ExecuteTrajectory] Executing STOP motion...");
+        auto result = std::make_shared<ExecuteTrajectory::Result>();
+
+        // 1) Check if canceled before we start
+        if (goal_handle->is_canceling())
+        {
+            RCLCPP_WARN(node_->get_logger(), "[ExecuteTrajectory] STOP goal canceled before execution.");
+            result->success = false;
+            result->message = "Canceled before execution";
+            goal_handle->canceled(result);
+            return;
+        }
+
+        // 2) Actually send the short stop trajectory
+        double dec_time = 1.0;
+        bool ok = planner_->sendControlledStop(dec_time);
+
+        // 3) If canceled mid-stop
+        if (goal_handle->is_canceling())
+        {
+            RCLCPP_WARN(node_->get_logger(), "[ExecuteTrajectory] STOP goal canceled mid‐execution.");
+            result->success = false;
+            result->message = "Canceled mid‐execution";
+            goal_handle->canceled(result);
+            return;
+        }
+
+        // 4) Finalize
+        if (ok)
+        {
+            RCLCPP_INFO(node_->get_logger(), "[ExecuteTrajectory] STOP completed successfully.");
+            result->success = true;
+            result->message = "Stop complete";
+            goal_handle->succeed(result);
+        }
+        else
+        {
+            RCLCPP_ERROR(node_->get_logger(), "[ExecuteTrajectory] STOP motion failed or was aborted by the controller.");
+            result->success = false;
+            result->message = "Stop motion failed";
             goal_handle->abort(result);
         }
     }

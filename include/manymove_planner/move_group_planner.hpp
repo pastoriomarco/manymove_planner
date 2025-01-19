@@ -129,6 +129,16 @@ public:
         const std::vector<manymove_planner::msg::MovementConfig> &configs,
         std::vector<size_t> &sizes) override;
 
+    /**
+     * @brief Send a short trajectory to the FollowJointTrajectory controller that decelerates
+     *        the robot to zero velocity from its current state.
+     *
+     * @param deceleration_time seconds over which to ramp velocities down to 0
+     * @return true if the goal was sent and completed successfully
+     * @return false if something failed
+     */
+    bool sendControlledStop(double deceleration_time = 1.0);
+
 private:
     /**
      * @brief Compute the total path length of a trajectory.
