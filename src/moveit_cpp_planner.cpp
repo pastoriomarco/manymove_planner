@@ -17,6 +17,13 @@ MoveItCppPlanner::MoveItCppPlanner(
 {
     moveit_cpp_ptr_ = std::make_shared<moveit_cpp::MoveItCpp>(node_);
     moveit_cpp_ptr_->getPlanningSceneMonitor()->providePlanningSceneService();
+
+    /**
+     * The following functions were used to publish the standard topics and services needed by the manymove_object_manager package.
+     * Correctly configuring /config/moveit_cpp.yaml and the package launchers seems to offer the same results, while adding
+     * these lines seems to compromise the package functionality in some contexts: for example, inside the current
+     * NVIDIA Isaac ROS 3.1/3.2 docker container for Isaac Manipulator.
+     */
     // // moveit_cpp_ptr_->getPlanningSceneMonitor()->requestPlanningSceneState("get_planning_scene");
     // moveit_cpp_ptr_->getPlanningSceneMonitor()->startSceneMonitor();
     // moveit_cpp_ptr_->getPlanningSceneMonitor()->startStateMonitor();
@@ -285,12 +292,15 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
         planning_components_->setStartStateToCurrentState();
     }
 
-    // // Create PlanRequestParameters and set scaling factors
-    // moveit_cpp::PlanningComponent::PlanRequestParameters params;
-    // params.planning_pipeline = "ompl"; // or the name of your pipeline from your moveit_cpp.yaml
-    // params.max_velocity_scaling_factor = goal_msg.goal.config.velocity_scaling_factor;
-    // params.max_acceleration_scaling_factor = goal_msg.goal.config.acceleration_scaling_factor;
-    // // You can set other parameters in `params` as needed.
+    /** Create PlanRequestParameters and set scaling factors
+     * moveit_cpp::PlanningComponent::PlanRequestParameters params;
+     * params.planning_pipeline = "ompl"; // or the name of your pipeline from your moveit_cpp.yaml
+     * params.max_velocity_scaling_factor = goal_msg.goal.config.velocity_scaling_factor;
+     * params.max_acceleration_scaling_factor = goal_msg.goal.config.acceleration_scaling_factor;
+     * IMPORTANT NOTE: You can set other parameters in `params` as needed, but remember that if you 
+     * set even one parameter you will have to set all of them. When I last tried, setting one 
+     * parameter had as consequence that none of the default parameters is used anymore.
+     */
 
     // Set movement targets
     if ((goal_msg.goal.movement_type == "joint") || (goal_msg.goal.movement_type == "named"))
@@ -597,7 +607,7 @@ bool MoveItCppPlanner::applyTimeParameterization(
         }
         else
         {
-            RCLCPP_WARN(logger_, "Limiting cartesian speed failed, trying again limiting scaling factors...");
+            RCLCPP_WARN(logger_, "Cartesian speed exceeds limits: reducing scaling factors...");
             double scale = (config.max_cartesian_speed * 0.99) / max_speed;
             velocity_scaling_factor *= scale;
             // Adjust acceleration similarly

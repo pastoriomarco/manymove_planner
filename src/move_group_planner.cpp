@@ -166,6 +166,7 @@ bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajecto
         }
         else
         {
+            RCLCPP_WARN(logger_, "Cartesian speed exceeds limits: reducing scaling factors...");
             double scale = (config.max_cartesian_speed * 0.99) / max_speed;
             velocity_scaling_factor *= scale;
             // Adjust acceleration similarly (heuristic)

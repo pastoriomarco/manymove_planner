@@ -36,7 +36,8 @@
  * This class implements the PlannerInterface methods using MoveItCpp as the
  * underlying planning framework. It provides functionalities for trajectory
  * generation, time parameterization, and optionally execution through a
- * FollowJointTrajectory action server.
+ * FollowJointTrajectory action server.It provides utilities to handle multiple
+ * movement types (joint, pose, named, cartesian).
  */
 class MoveItCppPlanner : public PlannerInterface
 {
@@ -69,24 +70,32 @@ public:
     ~MoveItCppPlanner() override = default;
 
     /**
-     * @brief Plan a trajectory for a given goal.
-     * @param goal The goal for the manipulator.
+     * @brief Plan a trajectory for a single goal.
+     * @param goal The MoveManipulator goal containing movement type and parameters.
      * @return A pair containing a success flag and the planned robot trajectory.
      */
     std::pair<bool, moveit_msgs::msg::RobotTrajectory> plan(const manymove_planner::action::MoveManipulator::Goal &goal) override;
 
     /**
      * @brief Plan a sequence of trajectories for multiple goals.
-     * @param sequence_goal The sequence of goals for the manipulator.
-     * @return A pair containing a list of planned trajectories and associated movement configurations.
+     * @param sequence_goal A list of MoveManipulator goals to plan sequentially.
+     * @return A pair of vectors containing planned trajectories and their respective movement configs.
      */
     std::pair<std::vector<moveit_msgs::msg::RobotTrajectory>, std::vector<manymove_planner::msg::MovementConfig>> planSequence(
         const manymove_planner::action::MoveManipulatorSequence::Goal &sequence_goal) override;
 
     /**
      * @brief Execute a planned trajectory on the robot.
-     * @param trajectory The trajectory to be executed.
-     * @return True if execution was successful, false otherwise.
+     * @param trajectory The trajectory to execute.
+     * @return True if execution succeeded, false otherwise.
+     *
+     * @details This function doesn't use the internal functionalities of its implementation (MoveGroup or MoveItCPP):
+     * instead, it uses a standard MoveIt functionality as the controller's trajectory execution action server, which
+     * in this context is usually <robot_name>_traj_controller/follow_joint_trajectory. Older versions of this package
+     * did use the specific functions of its implementation, for example the execute() and asyncExecute() funcions, but
+     * this created differences in if and how parallel planning and execution would be handled dependin on which implementation
+     * is used. Using the traj_controller separates the concerns of planning and execution and makes the implementation more
+     * consistant.
      */
     bool executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory) override;
 
@@ -96,6 +105,16 @@ public:
      * @param sizes Vector of trajectory segment sizes (number of points per segment).
      * @param goal_handle The goal handle for providing feedback to an action server.
      * @return True if execution was successful, false otherwise.
+     *
+     * @details This version of the executeTrajectory implementation leverages the traj_controller's feedback to get info about
+     * the current state of execution. ManymovePlanner is designed to let the user parallelize the planning and the execution
+     * of the moves, and while constructing the package I tried different approaches: in an execution made by several chained moves,
+     * this function could let the logic builder package (for example manymove_cpp_trees or manymove_py_trees) get a feedback
+     * on where the execution of the trajectory was. This could be useful to handle a failed execution, but in later stages
+     * of the design of the logic builders I decided to chain each move directly in the logic builder package, thus making this
+     * function only used on some functions of this package not currently used in the logic builder packages. This package still
+     * publishes the sequence_action_server that lets the user plan and execute directly a sequence of moves, and may be used
+     * to implement different logic bulider packages from those offered in ManyMove project.
      */
     bool executeTrajectoryWithFeedback(
         const moveit_msgs::msg::RobotTrajectory &trajectory,
@@ -174,6 +193,18 @@ private:
      * @param trajectory Pointer to a RobotTrajectory to parameterize.
      * @param config The movement configuration specifying velocity/acceleration factors, etc.
      * @return True if the time parameterization succeeded, false otherwise.
+     * 
+     * @details Most of the industrial and collaborative robots have a maximum cartesian speed over which the robot will perform
+     * and emergency stop. Moreover, safety regulations in collaborative applications require the enforcement of maximum cartesian
+     * speed limits. While this package is not meant to provide functionalities compliant with safety regulations, most robots 
+     * will come with such functionalities from factory, and they can't (or shouldn't) be overruled or removed.
+     * This function not only applies the time parametrization required for the trajectory to be executed with a smooth motion, 
+     * but also reduces the velocity scaling if the calculated cartesian speed at any segment of the trajectory exceeds the 
+     * cartesian limit set on the @p config parameter. Currently this function only limits the velocity scaling factor, not the
+     * acceleration scaling factor: this allows for faster movements as the acceleration is not reduced together with the 
+     * velocity, but try to keep velocities and accelerations coherent with the cartesian speed you want to obtain. Having really
+     * slow moves with high accelerations may cause jerky and instable moves, so when you set the @p config param always try to 
+     * keep the velocity and acceleration scaling factors coherent with the maximum cartesian speed you set.
      */
     bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
 
@@ -184,6 +215,25 @@ private:
      */
     moveit_msgs::msg::RobotTrajectory convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const;
 
+    /**
+     * @brief Collision-check callback used by Cartesian path computations.
+     * @param state Pointer to the RobotState being tested for collisions.
+     * @param group Pointer to the JointModelGroup for which collision checks should be performed.
+     * @return True if the state is free of collisions, false otherwise.
+     *
+     * @details This function is provided as a custom validity checker for
+     * moveit::core::CartesianInterpolator::computeCartesianPath(), ensuring that
+     * intermediate states do not collide with any known obstacles or the robot
+     * itself. Without isStateValid() used as a callback function, computeCartesianPath()
+     * wouldn't check for collisions just for mesh objects, while it did for primitive objects.
+     * I couldn't figure if I missed some setting to avoid this problem, if I found some edge
+     * cases that resulted in this abnormal behavior, or if it is in fact the intended behavior
+     * of computeCartesianPath(). Regardless, this seems to solve the issue.
+     * The function performs a collision check on the given @p state for the
+     * specified joint model group. It uses a read only locked version of the current
+     * Planning Scene to verify whether the @p state is in collision. If a collision is
+     * detected, the function logs a warning and returns false. Otherwise, it returns true.
+     */
     bool isStateValid(const moveit::core::RobotState *state, const moveit::core::JointModelGroup *group);
 
     rclcpp::Node::SharedPtr node_; ///< Shared pointer to the ROS2 node.

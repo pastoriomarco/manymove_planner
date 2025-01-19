@@ -30,9 +30,10 @@
  * @brief A planner class integrating with MoveGroupInterface for motion planning in ROS2.
  *
  * This class implements the PlannerInterface using MoveGroupInterface as the
- * underlying mechanism to plan and optionally execute trajectories via
- * FollowJointTrajectory. It provides utilities to handle multiple movement
- * types (joint, pose, named, cartesian).
+ * underlying planning framework. It provides functionalities for trajectory
+ * generation, time parameterization, and optionally execution through a
+ * FollowJointTrajectory action server.It provides utilities to handle multiple
+ * movement types (joint, pose, named, cartesian).
  */
 class MoveGroupPlanner : public PlannerInterface
 {
@@ -83,6 +84,14 @@ public:
      * @brief Execute a planned trajectory on the robot.
      * @param trajectory The trajectory to execute.
      * @return True if execution succeeded, false otherwise.
+     *
+     * @details This function doesn't use the internal functionalities of its implementation (MoveGroup or MoveItCPP):
+     * instead, it uses a standard MoveIt functionality as the controller's trajectory execution action server, which
+     * in this context is usually <robot_name>_traj_controller/follow_joint_trajectory. Older versions of this package
+     * did use the specific functions of its implementation, for example the execute() and asyncExecute() funcions, but
+     * this created differences in if and how parallel planning and execution would be handled dependin on which implementation
+     * is used. Using the traj_controller separates the concerns of planning and execution and makes the implementation more
+     * consistant.
      */
     bool executeTrajectory(const moveit_msgs::msg::RobotTrajectory &trajectory) override;
 
@@ -92,6 +101,16 @@ public:
      * @param sizes The sizes (number of points) for each segment of the trajectory.
      * @param goal_handle The action server goal handle for providing feedback.
      * @return True if execution succeeded, false otherwise.
+     *
+     * @details This version of the implementation leverages the traj_controller's feedback to get info about the current
+     * state of execution. ManymovePlanner is designed to let the user parallelize the planning and the execution of the
+     * moves, and while constructing the package I tried different approaches: in an execution made by several chained moves,
+     * this function could let the logic builder package (for example manymove_cpp_trees or manymove_py_trees) get a feedback
+     * on where the execution of the trajectory was. This could be useful to handle a failed execution, but in later stages
+     * of the design of the logic builders I decided to chain each move directly in the logic builder package, thus making this
+     * function only used on some functions of this package not currently used in the logic builder packages. This package still
+     * publishes the sequence_action_server that lets the user plan and execute directly a sequence of moves, and may be used
+     * to implement different logic bulider packages from those offered in ManyMove project.
      */
     bool executeTrajectoryWithFeedback(
         const moveit_msgs::msg::RobotTrajectory &trajectory,
@@ -139,6 +158,18 @@ private:
      * @param trajectory Pointer to the robot trajectory.
      * @param config Movement configuration specifying scaling factors and smoothing type.
      * @return True if time parameterization succeeded, false otherwise.
+     *
+     * @details Most of the industrial and collaborative robots have a maximum cartesian speed over which the robot will perform
+     * and emergency stop. Moreover, safety regulations in collaborative applications require the enforcement of maximum cartesian
+     * speed limits. While this package is not meant to provide functionalities compliant with safety regulations, most robots
+     * will come with such functionalities from factory, and they can't (or shouldn't) be overruled or removed.
+     * This function not only applies the time parametrization required for the trajectory to be executed with a smooth motion,
+     * but also reduces the velocity scaling if the calculated cartesian speed at any segment of the trajectory exceeds the
+     * cartesian limit set on the @p config parameter. Currently this function only limits the velocity scaling factor, not the
+     * acceleration scaling factor: this allows for faster movements as the acceleration is not reduced together with the
+     * velocity, but try to keep velocities and accelerations coherent with the cartesian speed you want to obtain. Having really
+     * slow moves with high accelerations may cause jerky and instable moves, so when you set the @p config param always try to
+     * keep the velocity and acceleration scaling factors coherent with the maximum cartesian speed you set.
      */
     bool applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config);
 
