@@ -13,12 +13,14 @@ planning_pipelines:
 plan_request_params:
   planning_attempts: 1
   planning_pipeline: ompl
+  planner_id: RRTConnect
   max_velocity_scaling_factor: 1.0
   max_acceleration_scaling_factor: 1.0
 
-# # -------------------------------------
-# # ADDITIONAL OPTIONAL PARAMETERS BELOW
-# # -------------------------------------
+# # # -------------------------------------
+# # # ADDITIONAL OPTIONAL PARAMETERS BELOW
+# # # TO CHECK IF AVAILABLE IN CURRENT MOVEIT VERSION
+# # # -------------------------------------
 
 # # 1. Parallel planning or multi-threading
 # ompl:
