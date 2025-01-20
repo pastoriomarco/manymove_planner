@@ -1199,7 +1199,7 @@ bool MoveItCppPlanner::isStateValid(const moveit::core::RobotState *state,
 
 bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
 {
-    RCLCPP_INFO(logger_, "Constructing a short 'controlled stop' trajectory (%.2fs).",
+    RCLCPP_INFO(logger_, "Constructing a short 'controlled stop' trajectory (%.2fs) [SINGLE-POINT].",
                 deceleration_time);
 
     // 1) Make sure the FollowJointTrajectory action server is up
@@ -1209,16 +1209,13 @@ bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
         return false;
     }
 
-    // 2) Get current joint positions from MoveIt
-    //    This won't have live joint velocities unless you have a real robot or a sim that
-    //    publishes them. If velocities are not available, we might approximate them as zero.
+    // 2) Get current robot state
     auto current_state = moveit_cpp_ptr_->getCurrentState();
     if (!current_state)
     {
         RCLCPP_ERROR(logger_, "Failed to get current robot state for stop trajectory.");
         return false;
     }
-
     const auto &joint_model_group = current_state->getJointModelGroup(planning_group_);
     if (!joint_model_group)
     {
@@ -1226,42 +1223,35 @@ bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
         return false;
     }
 
-    // The robot model tells us which joints we care about
+    // Grab joint names and positions
     const std::vector<std::string> &joint_names = joint_model_group->getVariableNames();
-
-    // Extract current joint positions
     std::vector<double> positions;
     current_state->copyJointGroupPositions(joint_model_group, positions);
 
-    // (Optional) Extract approximate velocities from the JointGroup
-    // MoveIt core might not know real velocities unless you feed them in.
-    // We'll just do zeros for safety:
+    // If we can’t read actual velocities, just assume 0
     std::vector<double> velocities(positions.size(), 0.0);
 
-    // 3) Build a 2-point trajectory
+    // 3) Build a SINGLE-point trajectory
     control_msgs::action::FollowJointTrajectory::Goal stop_goal;
     stop_goal.trajectory.joint_names = joint_names;
 
-    // Point 1: current position, current velocity
+    // Only Point: current position, zero velocity
+    // time_from_start can be 0.0 if your controller is okay with that,
+    // or something small like 0.1. Right now it is left to the user to 
+    // decide, but the default is 0.25
     trajectory_msgs::msg::JointTrajectoryPoint p0;
     p0.positions = positions;
-    p0.velocities = velocities; // might be 0 if not known
+    p0.velocities = velocities;
     p0.accelerations.resize(positions.size(), 0.0);
-    p0.time_from_start = rclcpp::Duration(0, 0); // at time=0
 
-    // Point 2: same position or a small difference, but zero velocity
-    // Use deceleration_time seconds to ramp down.
-    trajectory_msgs::msg::JointTrajectoryPoint p1;
-    p1.positions = positions;
-    p1.velocities.resize(positions.size(), 0.0);
-    p1.accelerations.resize(positions.size(), 0.0);
-    p1.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
+    // Use deceleration_time to define how long we give the controller to ramp to zero velocity.
+    // A larger deceleration_time will produce a smoother (but slower) stop.
+    p0.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
 
     stop_goal.trajectory.points.push_back(p0);
-    stop_goal.trajectory.points.push_back(p1);
 
-    // 4) Send the new "stop" goal and optionally wait for result
-    RCLCPP_INFO(logger_, "Sending 'controlled stop' trajectory with 2 points.");
+    // 4) Send the new "stop" goal
+    RCLCPP_INFO(logger_, "Sending single-point 'stop' trajectory.");
 
     auto send_goal_future = follow_joint_traj_client_->async_send_goal(stop_goal);
     if (send_goal_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
@@ -1269,6 +1259,7 @@ bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
         RCLCPP_ERROR(logger_, "Timeout while sending stop trajectory goal.");
         return false;
     }
+
     auto goal_handle = send_goal_future.get();
     if (!goal_handle)
     {
@@ -1276,19 +1267,19 @@ bool MoveItCppPlanner::sendControlledStop(double deceleration_time)
         return false;
     }
 
-    // Wait for the result (optional, but let's do it to confirm it executes)
+    // Wait for the result (optional)
     auto result_future = follow_joint_traj_client_->async_get_result(goal_handle);
-
     if (result_future.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
     {
         RCLCPP_ERROR(logger_, "Controlled stop goal did not finish before timeout.");
         return false;
     }
+
     auto wrapped_result = result_future.get();
     switch (wrapped_result.code)
     {
     case rclcpp_action::ResultCode::SUCCEEDED:
-        RCLCPP_INFO(logger_, "Controlled stop completed successfully.");
+        RCLCPP_INFO(logger_, "Single-point stop completed successfully.");
         return true;
     case rclcpp_action::ResultCode::ABORTED:
         RCLCPP_ERROR(logger_, "Stop goal was aborted by the controller.");

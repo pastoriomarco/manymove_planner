@@ -53,8 +53,11 @@ public:
             std::bind(&MoveManipulatorActionServer::handle_execute_accepted, this, std::placeholders::_1));
 
         /**
-         * This action server was created to receive stop commands if the robot needs a relatively controlled stop.
-         * Still under construction.
+         * The stop_motion action server is used to stop the current execution of exection_action_server if needed.
+         * By itself, the traj_controller keeps executing the trajectory even it received the cancel command. But if it
+         * receives a new trajectory to execute it switches to it. The stop server just sends a new trajectory with
+         * the current position and the velocity at zero. This is not very elegant, but it seems not to cause extreme
+         * move reactions in the manipulator moves.
          */
         stop_motion_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
@@ -347,6 +350,13 @@ private:
         }
     }
 
+    /**
+     * The stop_motion action servers takes as input any traj and just stops the motion of the manipulator
+     * by overriding the current trajectory execution by traj_controller with the current position,
+     * zero velocity, and deceleration time. The robot will try to "spring back" to the position it was
+     * when the stop command is issued within the deceleration time. The higher the time, the smoother
+     * the stop, but the higher the move lenght to decelerate and come back to the stop point.
+     */
     // StopMotion callbacks:
     rclcpp_action::GoalResponse handle_stop_goal(
         [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
@@ -387,7 +397,7 @@ private:
         }
 
         // 2) Actually send the short stop trajectory
-        double dec_time = 1.0;
+        double dec_time = 0.25;
         bool ok = planner_->sendControlledStop(dec_time);
 
         // 3) If canceled mid-stop

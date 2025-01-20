@@ -134,14 +134,17 @@ public:
         std::vector<size_t> &sizes) override;
 
     /**
-     * @brief Send a short trajectory to the FollowJointTrajectory controller that decelerates
-     *        the robot to zero velocity from its current state.
-     *
+     * @brief The stop_motion action servers takes as input any traj and just stops the motion of the manipulator
+     * by overriding the current trajectory execution by traj_controller with the current position,
+     * zero velocity, and deceleration time. The robot will try to "spring back" to the position it was
+     * when the stop command is issued within the deceleration time. The higher the time, the smoother
+     * the stop, but the higher the move lenght to decelerate and come back to the stop point.
+     * 
      * @param deceleration_time seconds over which to ramp velocities down to 0
      * @return true if the goal was sent and completed successfully
      * @return false if something failed
      */
-    bool sendControlledStop(double deceleration_time = 1.0);
+    bool sendControlledStop(double deceleration_time = 0.25);
 
 private:
     /**
