@@ -55,10 +55,10 @@ def launch_setup(context, *args, **kwargs):
     plan_number_target = LaunchConfiguration('plan_number_target')
     plan_number_limit = LaunchConfiguration('plan_number_limit')
 
-    planning_group = LaunchConfiguration('planning_group')
     base_frame = LaunchConfiguration('base_frame')
     tcp_frame = LaunchConfiguration('tcp_frame')
-    traj_controller = LaunchConfiguration('traj_controller')
+    
+    xarm_type = '{}{}'.format(robot_type.perform(context), dof.perform(context) if robot_type.perform(context) in ('xarm', 'lite') else '')
 
     # ros2_control_plugin = 'uf_robot_hardware/UFRobotFakeSystemHardware'
     # controllers_name = 'fake_controllers'
@@ -130,11 +130,11 @@ def launch_setup(context, *args, **kwargs):
                 'max_cartesian_speed': max_cartesian_speed,
                 'plan_number_target': plan_number_target,
                 'plan_number_limit': plan_number_limit,
-                # Adding the new parameters here
-                'planning_group': planning_group,
-                'base_frame': base_frame,
-                'tcp_frame': tcp_frame,
-                'traj_controller': traj_controller,
+                'planner_prefix': prefix.perform(context),
+                'planning_group': xarm_type, 
+                'base_frame': base_frame.perform(context), 
+                'tcp_frame': tcp_frame.perform(context), 
+                'traj_controller': "{}_traj_controller".format(xarm_type),
 
             }
         ],

@@ -137,10 +137,11 @@ def launch_setup(context, *args, **kwargs):
                 'max_cartesian_speed': max_cartesian_speed,
                 'plan_number_target': plan_number_target,
                 'plan_number_limit': plan_number_limit,
-                'planning_group': '{}{}'.format(prefix.perform(context), xarm_type), 
-                'base_frame': '{}{}'.format(prefix.perform(context), base_frame.perform(context)), 
-                'tcp_frame': '{}{}'.format(prefix.perform(context), tcp_frame.perform(context)), 
-                'traj_controller': "{}{}_traj_controller".format(prefix.perform(context), xarm_type),
+                'planner_prefix': prefix.perform(context),
+                'planning_group': xarm_type, 
+                'base_frame': base_frame.perform(context), 
+                'tcp_frame': tcp_frame.perform(context), 
+                'traj_controller': "{}_traj_controller".format(xarm_type),
             }
         ],
     )
@@ -228,6 +229,19 @@ def launch_setup(context, *args, **kwargs):
                 '--controller-manager', '/controller_manager'
             ],
         ))
+
+    # ================================================================
+    # launch manymove_object_manager
+    # ================================================================
+
+    # Static TF
+    object_manager_node = Node(
+        package='manymove_object_manager',
+        executable='object_manager_node',
+        name='object_manager_node',
+        output='screen',
+        parameters=[{'frame_id': 'world'}]
+    )
     
     return [
         robot_state_publisher,
@@ -236,6 +250,7 @@ def launch_setup(context, *args, **kwargs):
         static_tf,
         ros2_control_node,
         rviz_node,
+        object_manager_node,
     ] + controller_nodes
 
 

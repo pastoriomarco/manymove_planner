@@ -15,6 +15,9 @@ int main(int argc, char **argv)
     std::string planner_type;
     node->get_parameter_or<std::string>("planner_type", planner_type, "moveitcpp");
 
+    std::string planner_prefix;
+    node->get_parameter_or<std::string>("planner_prefix", planner_prefix, "");
+
     std::string planning_group;
     node->get_parameter_or<std::string>("planning_group", planning_group, "lite6");
     std::string base_frame;
@@ -23,6 +26,11 @@ int main(int argc, char **argv)
     node->get_parameter_or<std::string>("tcp_frame", tcp_frame, "link_tcp");
     std::string traj_controller;
     node->get_parameter_or<std::string>("traj_controller", traj_controller, "lite6_traj_controller");
+
+    planning_group = planner_prefix + planning_group;
+    base_frame = planner_prefix + base_frame;
+    tcp_frame = planner_prefix + tcp_frame;
+    traj_controller = planner_prefix + traj_controller;
 
     // Instantiate the appropriate planner based on the planner_type parameter
     std::shared_ptr<PlannerInterface> planner;
@@ -47,7 +55,7 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    auto server = std::make_shared<MoveManipulatorActionServer>(node, planner);
+    auto server = std::make_shared<MoveManipulatorActionServer>(node, planner, planner_prefix);
 
     rclcpp::executors::MultiThreadedExecutor executor;
     executor.add_node(node);

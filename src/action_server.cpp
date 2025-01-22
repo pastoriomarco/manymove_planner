@@ -21,33 +21,34 @@ public:
     using GoalHandleExecuteTrajectory = rclcpp_action::ServerGoalHandle<ExecuteTrajectory>;
 
     MoveManipulatorActionServer(const rclcpp::Node::SharedPtr &node,
-                                const std::shared_ptr<PlannerInterface> &planner)
-        : node_(node), planner_(planner)
+                                const std::shared_ptr<PlannerInterface> &planner,
+                                const std::string &planner_prefix = "")
+        : node_(node), planner_(planner), planner_prefix_(planner_prefix)
     {
         single_action_server_ = rclcpp_action::create_server<MoveManipulator>(
             node_,
-            "move_manipulator",
+            planner_prefix_ + "move_manipulator",
             std::bind(&MoveManipulatorActionServer::handle_single_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_single_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_single_accepted, this, std::placeholders::_1));
 
         sequence_action_server_ = rclcpp_action::create_server<MoveManipulatorSequence>(
             node_,
-            "move_manipulator_sequence",
+            planner_prefix_ + "move_manipulator_sequence",
             std::bind(&MoveManipulatorActionServer::handle_sequence_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_sequence_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_sequence_accepted, this, std::placeholders::_1));
 
         plan_action_server_ = rclcpp_action::create_server<PlanManipulator>(
             node_,
-            "plan_manipulator",
+            planner_prefix_ + "plan_manipulator",
             std::bind(&MoveManipulatorActionServer::handle_plan_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_plan_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_plan_accepted, this, std::placeholders::_1));
 
         execute_action_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
-            "execute_manipulator_traj",
+            planner_prefix_ + "execute_manipulator_traj",
             std::bind(&MoveManipulatorActionServer::handle_execute_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_execute_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_execute_accepted, this, std::placeholders::_1));
@@ -61,7 +62,7 @@ public:
          */
         stop_motion_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
-            "stop_motion",
+            planner_prefix_ + "stop_motion",
             std::bind(&MoveManipulatorActionServer::handle_stop_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_stop_cancel, this, std::placeholders::_1),
             std::bind(&MoveManipulatorActionServer::handle_stop_accept, this, std::placeholders::_1));
@@ -70,6 +71,7 @@ public:
 private:
     rclcpp::Node::SharedPtr node_;
     std::shared_ptr<PlannerInterface> planner_;
+    std::string planner_prefix_;
 
     rclcpp_action::Server<MoveManipulator>::SharedPtr single_action_server_;
     rclcpp_action::Server<MoveManipulatorSequence>::SharedPtr sequence_action_server_;
