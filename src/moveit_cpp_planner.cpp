@@ -617,7 +617,7 @@ bool MoveItCppPlanner::applyTimeParameterization(
         }
         else
         {
-            RCLCPP_WARN(logger_, "Cartesian speed exceeds limits: reducing scaling factors...");
+            RCLCPP_WARN(logger_, "Adjusting cartesian within limits: reducing scaling factors...");
             double scale = (config.max_cartesian_speed * 0.99) / max_speed;
             velocity_scaling_factor *= scale;
             // Adjust acceleration similarly
