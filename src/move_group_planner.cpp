@@ -28,6 +28,16 @@ MoveGroupPlanner::MoveGroupPlanner(
     {
         RCLCPP_INFO(logger_, "FollowJointTrajectory action server available");
     }
+
+    // /joint_states subscriber to map positions and velocities
+    joint_state_sub_ = node_->create_subscription<sensor_msgs::msg::JointState>(
+        "/joint_states",
+        rclcpp::SensorDataQoS(),
+        std::bind(&MoveGroupPlanner::jointStateCallback, this, std::placeholders::_1));
+
+    // For safety, initialize the maps as empty
+    current_positions_.clear();
+    current_velocities_.clear();
 }
 
 double MoveGroupPlanner::computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const
@@ -788,67 +798,98 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveGroupPlanner::applyTimePa
 
 bool MoveGroupPlanner::sendControlledStop(double deceleration_time)
 {
-    RCLCPP_INFO(logger_, "Constructing a single-point 'controlled stop' trajectory (%.2fs).",
-                deceleration_time);
+    RCLCPP_INFO(logger_, "[MoveGroupPlanner] Constructing a short 'controlled stop' trajectory (%.2fs).", deceleration_time);
 
-    // 1) Make sure the FollowJointTrajectory action server is up
+    // 1) Wait for the FollowJointTrajectory action server
     if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(2)))
     {
-        RCLCPP_ERROR(logger_, "Cannot send stop trajectory, FollowJointTrajectory server is not available.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Cannot send stop trajectory, FollowJointTrajectory server is not available.");
         return false;
     }
 
-    // 2) Retrieve current joint positions
-    std::vector<double> positions = move_group_interface_->getCurrentJointValues();
-    if (positions.empty())
+    // 2) Get the current state of the robot
+    const moveit::core::RobotState &current_state = *move_group_interface_->getCurrentState();
+    if (!current_state.getJointModelGroup(planning_group_))
     {
-        RCLCPP_ERROR(logger_, "Failed to retrieve current joint values.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] JointModelGroup '%s' not found.", planning_group_.c_str());
         return false;
     }
 
-    // (Optional) Current joint velocities are not directly accessible.
-    // We'll assume zero velocities for safety.
-    std::vector<double> velocities(positions.size(), 0.0);
+    const moveit::core::JointModelGroup *jmg = current_state.getJointModelGroup(planning_group_);
+    if (!jmg)
+    {
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] JointModelGroup '%s' not found.", planning_group_.c_str());
+        return false;
+    }
 
-    // 3) Build a single-point trajectory
-    //    We'll place the time_from_start at `deceleration_time` so the controller
-    //    sees a short time window in which to decelerate.
+    // Get the joint names in the group
+    std::vector<std::string> joint_names = jmg->getVariableNames();
+    std::vector<double> q0(joint_names.size(), 0.0);
+    std::vector<double> dq0(joint_names.size(), 0.0);
+
+    {
+        // Lock to safely read from current_positions_/velocities_
+        std::lock_guard<std::mutex> lock(js_mutex_);
+
+        for (size_t i = 0; i < joint_names.size(); ++i)
+        {
+            const auto &jn = joint_names[i];
+
+            // If not found in maps, default to 0.0
+            if (current_positions_.find(jn) != current_positions_.end())
+                q0[i] = current_positions_[jn];
+            if (current_velocities_.find(jn) != current_velocities_.end())
+                dq0[i] = current_velocities_[jn];
+        }
+    }
+
+    // 3) Estimate final positions after linear deceleration:
+    //    qf = q0 + 0.5 * dq0 * T_dec
+    //    (0.5 is because the average velocity during uniform decel from dq0 to 0 is dq0/2)
+    std::vector<double> qf(q0.size());
+    for (size_t i = 0; i < q0.size(); ++i)
+    {
+        double delta = 0.5 * dq0[i] * deceleration_time;
+        qf[i] = q0[i] + delta;
+    }
+
+    // 4) Build a single-point trajectory
     control_msgs::action::FollowJointTrajectory::Goal stop_goal;
-    stop_goal.trajectory.joint_names = move_group_interface_->getJointNames();
+    stop_goal.trajectory.joint_names = joint_names;
 
-    trajectory_msgs::msg::JointTrajectoryPoint stop_point;
-    stop_point.positions = positions;
-    stop_point.velocities = velocities; // Assume 0 if not available
-    stop_point.accelerations.resize(positions.size(), 0.0);
+    // We'll only specify the final point, time_from_start = deceleration_time
+    trajectory_msgs::msg::JointTrajectoryPoint p_final;
+    p_final.positions = qf;
+    // velocities -> zero
+    p_final.velocities.resize(q0.size(), 0.0);
+    p_final.accelerations.resize(q0.size(), 0.0);
+    // deceleration_time is the total time we allow for the motion
+    p_final.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
 
-    // Use deceleration_time to define how long we give the controller to ramp to zero velocity.
-    // A larger deceleration_time will produce a smoother (but slower) stop.
-    stop_point.time_from_start = rclcpp::Duration::from_seconds(deceleration_time);
+    stop_goal.trajectory.points.push_back(p_final);
 
-    stop_goal.trajectory.points.push_back(stop_point);
+    // 5) Send the new "stop" goal
+    RCLCPP_INFO(logger_, "[MoveGroupPlanner] Sending single-point 'stop' trajectory with final time %.2fs.", deceleration_time);
 
-    RCLCPP_INFO(logger_, "Sending single-point stop trajectory [time_from_start=%.2fs].", deceleration_time);
-
-    // 4) Send the goal
     auto send_goal_future = follow_joint_traj_client_->async_send_goal(stop_goal);
     if (send_goal_future.wait_for(std::chrono::seconds(5)) != std::future_status::ready)
     {
-        RCLCPP_ERROR(logger_, "Timeout while sending stop trajectory goal.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Timeout while sending stop trajectory goal.");
         return false;
     }
 
     auto goal_handle = send_goal_future.get();
     if (!goal_handle)
     {
-        RCLCPP_ERROR(logger_, "Stop trajectory goal was rejected by the controller.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Stop trajectory goal was rejected by the joint trajectory server.");
         return false;
     }
 
-    // 5) Optionally wait for result to confirm execution
+    // 6) Optionally wait for the result
     auto result_future = follow_joint_traj_client_->async_get_result(goal_handle);
     if (result_future.wait_for(std::chrono::seconds(10)) != std::future_status::ready)
     {
-        RCLCPP_ERROR(logger_, "Controlled stop goal did not finish before timeout.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Controlled stop goal did not finish before timeout.");
         return false;
     }
 
@@ -856,16 +897,39 @@ bool MoveGroupPlanner::sendControlledStop(double deceleration_time)
     switch (wrapped_result.code)
     {
     case rclcpp_action::ResultCode::SUCCEEDED:
-        RCLCPP_INFO(logger_, "Single-point controlled stop completed successfully.");
+        RCLCPP_INFO(logger_, "[MoveGroupPlanner] Single-point stop completed successfully.");
         return true;
     case rclcpp_action::ResultCode::ABORTED:
-        RCLCPP_ERROR(logger_, "Stop goal was aborted by the controller.");
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Stop goal was aborted by the controller.");
         return false;
     case rclcpp_action::ResultCode::CANCELED:
-        RCLCPP_WARN(logger_, "Stop goal was canceled by the controller.");
+        RCLCPP_WARN(logger_, "[MoveGroupPlanner] Stop goal was canceled by the controller.");
         return false;
     default:
-        RCLCPP_ERROR(logger_, "Stop goal ended with unknown result code %d.", (int)wrapped_result.code);
+        RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Stop goal ended with unknown result code %d.", (int)wrapped_result.code);
         return false;
+    }
+}
+
+void MoveGroupPlanner::jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
+{
+    // Lock mutex for thread-safe access
+    std::lock_guard<std::mutex> lock(js_mutex_);
+
+    // Update position/velocity for each joint in the message
+    for (size_t i = 0; i < msg->name.size(); ++i)
+    {
+        const std::string &joint_name = msg->name[i];
+
+        // Safety checks (avoid out of range)
+        double pos = 0.0;
+        double vel = 0.0;
+        if (i < msg->position.size())
+            pos = msg->position[i];
+        if (i < msg->velocity.size())
+            vel = msg->velocity[i];
+
+        current_positions_[joint_name] = pos;
+        current_velocities_[joint_name] = vel;
     }
 }

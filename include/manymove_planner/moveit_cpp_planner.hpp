@@ -139,7 +139,7 @@ public:
      * zero velocity, and deceleration time. The robot will try to "spring back" to the position it was
      * when the stop command is issued within the deceleration time. The higher the time, the smoother
      * the stop, but the higher the move lenght to decelerate and come back to the stop point.
-     * 
+     *
      * @param deceleration_time seconds over which to ramp velocities down to 0
      * @return true if the goal was sent and completed successfully
      * @return false if something failed
@@ -249,6 +249,8 @@ private:
      */
     bool isStateValid(const moveit::core::RobotState *state, const moveit::core::JointModelGroup *group);
 
+    void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
+
     rclcpp::Node::SharedPtr node_; ///< Shared pointer to the ROS2 node.
     rclcpp::Logger logger_;        ///< Logger instance for logging messages.
     std::string planning_group_;   ///< Name of the planning group.
@@ -261,4 +263,9 @@ private:
     moveit_cpp::PlanningComponent::PlanRequestParameters plan_parameters_; ///< Planning parameters loaded at startup.
 
     rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr follow_joint_traj_client_; ///< Action client for FollowJointTrajectory.
+    rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;                          ///< /joint_states subscriber.
+
+    std::mutex js_mutex_;
+    std::map<std::string, double> current_positions_;
+    std::map<std::string, double> current_velocities_;
 };
