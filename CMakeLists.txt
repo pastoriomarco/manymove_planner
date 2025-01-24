@@ -17,6 +17,7 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(rclcpp_action REQUIRED)
 find_package(action_msgs REQUIRED)
 find_package(control_msgs REQUIRED)
+find_package(controller_manager_msgs REQUIRED)
 
 # Generate messages and actions
 rosidl_generate_interfaces(${PROJECT_NAME}
@@ -26,6 +27,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MoveManipulatorGoal.msg"
   "action/PlanManipulator.action"
   "action/ExecuteTrajectory.action"
+  "action/ResetTrajController.action"
   DEPENDENCIES geometry_msgs action_msgs moveit_msgs
 )
 
@@ -112,6 +114,7 @@ ament_target_dependencies(action_server_node
   geometry_msgs
   action_msgs
   rosidl_default_runtime
+  controller_manager_msgs
 )
 
 install(TARGETS action_server_node

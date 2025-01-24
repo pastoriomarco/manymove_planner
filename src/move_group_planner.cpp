@@ -116,7 +116,10 @@ double MoveGroupPlanner::computeMaxCartesianSpeed(const robot_trajectory::RobotT
     return max_speed;
 }
 
-bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajectoryPtr &trajectory, const manymove_planner::msg::MovementConfig &config)
+// Apply Time Parameterization
+bool MoveGroupPlanner::applyTimeParameterization(
+    robot_trajectory::RobotTrajectoryPtr &trajectory,
+    const manymove_planner::msg::MovementConfig &config)
 {
     double velocity_scaling_factor = config.velocity_scaling_factor;
     double acceleration_scaling_factor = config.acceleration_scaling_factor;
@@ -141,12 +144,14 @@ bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajecto
         }
         else if (config.smoothing_type == "ruckig")
         {
+            // Note: Ruckig smoothing requires calling applySmoothing on the trajectory directly
             trajectory_processing::IterativeSplineParameterization time_param;
-            time_param_success = trajectory_processing::RuckigSmoothing::applySmoothing(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+            time_param_success = trajectory_processing::RuckigSmoothing::applySmoothing(
+                *trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
         else
         {
-            // Default fallback
+            // Default fallback to time_optimal
             trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
             time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
         }
@@ -156,15 +161,16 @@ bool MoveGroupPlanner::applyTimeParameterization(robot_trajectory::RobotTrajecto
             RCLCPP_ERROR(logger_, "Failed to compute time stamps using '%s'", config.smoothing_type.c_str());
 
             // try fallback approach:
-
-            // Reset durations again
+            RCLCPP_WARN(logger_, "Fallback to time-optimal smoothing...");
             for (size_t i = 1; i < trajectory->getWayPointCount(); i++)
                 trajectory->setWayPointDurationFromPrevious(i, 0.0);
-            trajectory_processing::TimeOptimalTrajectoryGeneration time_param;
-            time_param_success = time_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
+
+            trajectory_processing::TimeOptimalTrajectoryGeneration fallback_param;
+            time_param_success = fallback_param.computeTimeStamps(*trajectory, velocity_scaling_factor, acceleration_scaling_factor);
 
             if (!time_param_success)
             {
+                RCLCPP_ERROR(logger_, "Fallback time-optimal smoothing also failed.");
                 return false;
             }
         }

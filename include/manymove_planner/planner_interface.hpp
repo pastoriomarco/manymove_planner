@@ -88,6 +88,19 @@ public:
      */
     virtual bool sendControlledStop(double deceleration_time = 0.25) = 0;
 
+    /**
+     * @brief The stop_motion action servers takes as input any traj and just stops the motion of the manipulator
+     * by overriding the current trajectory execution by traj_controller with a position calculater as a linear,
+     * continuation of the current traj, going to zero velocity within deceleration time. The robot will slow down
+     * linearly when the stop command is issued within the deceleration time. The higher the time, the smoother
+     * the stop, but the higher the move lenght to decelerate and the discrepance with the original trajectory.
+     *
+     * @param deceleration_time seconds over which to ramp velocities down to 0
+     * @return true if the goal was sent and completed successfully
+     * @return false if something failed
+     */
+    virtual bool sendControlledStopLinear(double deceleration_time = 0.25) = 0;
+
 protected:
     /**
      * @brief Protected constructor to prevent direct instantiation of the interface.
