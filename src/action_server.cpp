@@ -399,7 +399,7 @@ private:
         }
 
         // 2) Actually send the short stop trajectory
-        double dec_time = 0.25;
+        double dec_time = 0.5;
         bool ok = planner_->sendControlledStop(dec_time);
 
         // 3) If canceled mid-stop

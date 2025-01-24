@@ -3,6 +3,7 @@ from launch import LaunchDescription
 from launch.substitutions import LaunchConfiguration
 from launch_ros.actions import Node
 from launch.actions import OpaqueFunction, DeclareLaunchArgument
+from launch.launch_description_sources import load_python_launch_file_as_module
 # from launch_ros.substitutions import FindPackageShare
 from ament_index_python.packages import get_package_share_directory
 from uf_ros_lib.uf_robot_utils import generate_ros2_control_params_temp_file
@@ -13,6 +14,8 @@ def launch_setup(context, *args, **kwargs):
     dof = LaunchConfiguration('dof', default=6)
     robot_type = LaunchConfiguration('robot_type', default='lite')
     prefix = LaunchConfiguration('prefix', default='')
+
+    use_sim_time = LaunchConfiguration('use_sim_time', default=False)
 
     hw_ns = LaunchConfiguration('hw_ns', default='ufactory')
     limited = LaunchConfiguration('limited', default=True)
@@ -72,6 +75,15 @@ def launch_setup(context, *args, **kwargs):
         robot_type=robot_type.perform(context)
     )
 
+    # from xarm_controller _ros2_control.launch.py
+    mod = load_python_launch_file_as_module(os.path.join(get_package_share_directory('xarm_api'), 'launch', 'lib', 'robot_api_lib.py'))
+    generate_robot_api_params = getattr(mod, 'generate_robot_api_params')
+    robot_params = generate_robot_api_params(
+        os.path.join(get_package_share_directory('xarm_api'), 'config', 'xarm_params.yaml'),
+        os.path.join(get_package_share_directory('xarm_api'), 'config', 'xarm_user_params.yaml'),
+        LaunchConfiguration('ros_namespace', default='').perform(context), node_name='ufactory_driver'
+    )
+
     moveit_config = (
         MoveItConfigsBuilder(
             context=context,
@@ -116,13 +128,15 @@ def launch_setup(context, *args, **kwargs):
         .to_moveit_configs()
     )
 
-    # Start the actual move_group node/action server
+    moveit_config_dict = moveit_config.to_dict()
+
+    # Start the move_group node/action servers
     move_group_node = Node(
         package='manymove_planner',
         executable='action_server_node',
         output='screen',
         parameters=[
-            moveit_config.to_dict(),
+            moveit_config_dict,
             {
                 'planner_type': 'moveitcpp',
                 'velocity_scaling_factor': velocity_scaling_factor,
@@ -163,12 +177,17 @@ def launch_setup(context, *args, **kwargs):
         ],
     )
 
+    xyz = attach_xyz.perform(context)[1:-1].split(' ')
+    rpy = attach_rpy.perform(context)[1:-1].split(' ')
+    arguments = xyz + rpy + [attach_to.perform(context), '{}link_base'.format(prefix.perform(context))]
+
     static_tf = Node(
         package='tf2_ros',
         executable='static_transform_publisher',
         name='static_transform_publisher',
         output='screen',
-        arguments=['0', '0', '0', '0', '0', '0', 'world', '{}link_base'.format(prefix.perform(context))],
+        arguments=arguments,
+        parameters=[{'use_sim_time': use_sim_time}],
     )
 
     # Publish TF
@@ -186,6 +205,7 @@ def launch_setup(context, *args, **kwargs):
         parameters=[
             moveit_config.robot_description,
             ros2_control_params,
+            robot_params,
         ],
         output='screen',
     )
@@ -241,8 +261,6 @@ def launch_setup(context, *args, **kwargs):
         object_manager_node,
     ] + controller_nodes
 
-    # return [move_group_node]
-
 
 def generate_launch_description():
     return LaunchDescription([
@@ -256,8 +274,6 @@ def generate_launch_description():
         DeclareLaunchArgument('max_cartesian_speed', default_value='0.5', description='Max cartesian speed'),
         DeclareLaunchArgument('plan_number_target', default_value='12', description='Plan number target'),
         DeclareLaunchArgument('plan_number_limit', default_value='32', description='Plan number limit'),
-        
-        # New DeclareLaunchArguments for base_frame, tcp_frame
         DeclareLaunchArgument('base_frame', default_value='link_base', description='Base frame of the robot'),
         DeclareLaunchArgument('tcp_frame', default_value='link_tcp', description='TCP (end effector) frame of the robot' ),
 
