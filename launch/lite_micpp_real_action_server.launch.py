@@ -1,3 +1,7 @@
+# ========================================================================
+# Contents from xarm_moveit_config/launch/_robot_moveit_realmove.launch.py
+# ========================================================================
+
 import os
 import yaml
 from ament_index_python import get_package_share_directory
@@ -54,6 +58,10 @@ def launch_setup(context, *args, **kwargs):
     ros_namespace = LaunchConfiguration('ros_namespace', default='').perform(context)
     use_sim_time = LaunchConfiguration('use_sim_time', default=False)
 
+    # ========================================================================
+    # Parameters for manymove_planner package
+    # ========================================================================
+
     velocity_scaling_factor = LaunchConfiguration('velocity_scaling_factor')
     acceleration_scaling_factor = LaunchConfiguration('acceleration_scaling_factor')
     max_exec_retries = LaunchConfiguration('max_exec_retries')
@@ -67,6 +75,10 @@ def launch_setup(context, *args, **kwargs):
     base_frame = LaunchConfiguration('base_frame')
     tcp_frame = LaunchConfiguration('tcp_frame')
 
+    # ========================================================================
+    # Contents from xarm_moveit_config/launch/_robot_moveit_realmove.launch.py
+    # ========================================================================
+
     ros2_control_plugin = 'uf_robot_hardware/UFRobotSystemHardware'
     controllers_name = 'controllers'
     xarm_type = '{}{}'.format(robot_type.perform(context), dof.perform(context) if robot_type.perform(context) in ('xarm', 'lite') else '')
@@ -79,6 +91,17 @@ def launch_setup(context, *args, **kwargs):
         ros_namespace=ros_namespace,
         robot_type=robot_type.perform(context)
     )
+
+    # ========================================================================
+    # WARNING: MODIFIED!!!
+
+    # Grouped MoveItConfigsBuilder to apply the following to enable moveitcpp parameters:
+
+    # .planning_scene_monitor(publish_robot_description=True, publish_robot_description_semantic=True)
+    # .planning_pipelines(pipelines=["ompl"])
+    # .moveit_cpp(file_path=get_package_share_directory("manymove_planner") + "/config/moveit_cpp_real_ufactory.yaml")
+
+    # ========================================================================
 
     moveit_config = (
         MoveItConfigsBuilder(
@@ -137,6 +160,8 @@ def launch_setup(context, *args, **kwargs):
         }.items(),
     )
 
+    # We skip moveit_config launch and we insert directly the parts we need:
+
     # # robot moveit common launch
     # # xarm_moveit_config/launch/_robot_moveit_common2.launch.py
     # robot_moveit_common_launch = IncludeLaunchDescription(
@@ -152,6 +177,12 @@ def launch_setup(context, *args, **kwargs):
     #     }.items(),
     # )
 
+    # ========================================================================
+    # Contents from xarm_moveit_config/launch/_robot_moveit_common2.launch.py
+    # ========================================================================
+
+    # We skip the original move_group_node as we start the action server that uses moveitcpp
+    # The defaults on the action_server_node.cpp are made for lite6, so we don't need to input them
     # Start the actual move_group node/action server
     move_group_node = Node(
         package='manymove_planner',
@@ -178,6 +209,8 @@ def launch_setup(context, *args, **kwargs):
             }
         ],
     )
+
+    # This is from _robot_moveit_common2.launch.py, modified to load the .rviz config from manymove package
 
     # Launch RViz
     rviz_config_file = (
@@ -220,21 +253,12 @@ def launch_setup(context, *args, **kwargs):
         parameters=[{'use_sim_time': use_sim_time}],
     )
 
+    # We skip the xarm_planner node as we won't use it here.
+    # With this we end the contents from xarm_moveit_config/launch/_robot_moveit_common2.launch.py
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    # ========================================================================
+    # Contents from xarm_moveit_config/launch/_robot_moveit_realmove.launch.py
+    # ========================================================================
 
     # joint state publisher node
     joint_state_publisher_node = Node(
