@@ -623,16 +623,10 @@ private:
         // Name of the service: <controller_name>/get_parameters
         auto client = node->create_client<rcl_interfaces::srv::GetParameters>(
             controller_name + "/get_parameters");
-
-        // We might want to fetch all known param names;
-        // or if you know them, pass them. Using wildcard "names = {*}" is not standard,
-        // but we'll do a demonstration for each param we suspect.
-        // In practice, you'd specify the parameter names or gather them from `ros2 param list`.
+            
         auto request = std::make_shared<rcl_interfaces::srv::GetParameters::Request>();
 
-        // Here, fill with known param names. For brevity, let's pick
-        // "allow_partial_joints_goal", "gains.joint1.p", etc.
-        // Or you can gather them from command-line queries if necessary.
+        // Param names. TODO: try to use the dump function on a string and parse it?
         request->names = {
             // Basic
             "action_monitor_rate",
