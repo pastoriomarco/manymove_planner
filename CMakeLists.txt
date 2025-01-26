@@ -27,7 +27,8 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/MoveManipulatorGoal.msg"
   "action/PlanManipulator.action"
   "action/ExecuteTrajectory.action"
-  "action/ResetTrajController.action"
+  "action/LoadTrajController.action"
+  "action/UnloadTrajController.action"
   DEPENDENCIES geometry_msgs action_msgs moveit_msgs
 )
 

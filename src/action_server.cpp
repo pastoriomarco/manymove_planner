@@ -3,16 +3,19 @@
 #include "manymove_planner/action/move_manipulator.hpp"
 #include "manymove_planner/action/move_manipulator_sequence.hpp"
 #include "manymove_planner/action/execute_trajectory.hpp"
-#include "manymove_planner/action/reset_traj_controller.hpp"
+#include "manymove_planner/action/unload_traj_controller.hpp"
+#include "manymove_planner/action/load_traj_controller.hpp"
 
+#include <memory>
+#include <thread>
 #include <rclcpp/rclcpp.hpp>
+#include <rclcpp_action/rclcpp_action.hpp>
 #include <rcl_interfaces/srv/get_parameters.hpp>
 #include <rcl_interfaces/srv/set_parameters.hpp>
 #include <controller_manager_msgs/srv/load_controller.hpp>
 #include <controller_manager_msgs/srv/unload_controller.hpp>
 #include <controller_manager_msgs/srv/switch_controller.hpp>
-
-#include <rclcpp_action/rclcpp_action.hpp>
+#include <controller_manager_msgs/srv/configure_controller.hpp>
 
 class MoveManipulatorActionServer
 {
@@ -28,62 +31,161 @@ public:
     using ExecuteTrajectory = manymove_planner::action::ExecuteTrajectory;
     using GoalHandleExecuteTrajectory = rclcpp_action::ServerGoalHandle<ExecuteTrajectory>;
 
-    using ResetTrajController = manymove_planner::action::ResetTrajController;
-    using GoalHandleResetTrajController = rclcpp_action::ServerGoalHandle<ResetTrajController>;
+    using UnloadTrajController = manymove_planner::action::UnloadTrajController;
+    using GoalHandleUnloadTrajController = rclcpp_action::ServerGoalHandle<UnloadTrajController>;
+
+    using LoadTrajController = manymove_planner::action::LoadTrajController;
+    using GoalHandleLoadTrajController = rclcpp_action::ServerGoalHandle<LoadTrajController>;
 
     MoveManipulatorActionServer(const rclcpp::Node::SharedPtr &node,
                                 const std::shared_ptr<PlannerInterface> &planner,
                                 const std::string &planner_prefix = "")
         : node_(node), planner_(planner), planner_prefix_(planner_prefix)
     {
+        // Create Reentrant Callback Groups
+        action_callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+        param_callback_group_ = node_->create_callback_group(rclcpp::CallbackGroupType::Reentrant);
+
+        // Initialize Service Clients
+        unload_controller_client_ = node_->create_client<controller_manager_msgs::srv::UnloadController>(
+            "/controller_manager/unload_controller",
+            rmw_qos_profile_services_default,
+            param_callback_group_);
+
+        load_controller_client_ = node_->create_client<controller_manager_msgs::srv::LoadController>(
+            "/controller_manager/load_controller",
+            rmw_qos_profile_services_default,
+            param_callback_group_);
+
+        switch_controller_client_ = node_->create_client<controller_manager_msgs::srv::SwitchController>(
+            "/controller_manager/switch_controller",
+            rmw_qos_profile_services_default,
+            param_callback_group_);
+
+        configure_controller_client_ = node_->create_client<controller_manager_msgs::srv::ConfigureController>(
+            "/controller_manager/configure_controller",
+            rmw_qos_profile_services_default,
+            param_callback_group_);
+
+        // get_parameters_client_ = node_->create_client<rcl_interfaces::srv::GetParameters>(
+        //     "lite6_traj_controller/get_parameters",
+        //     rmw_qos_profile_services_default,
+        // param_callback_group_);
+
+        // set_parameters_client_ = node_->create_client<rcl_interfaces::srv::SetParameters>(
+        //     "lite6_traj_controller/set_parameters",
+        //     rmw_qos_profile_services_default,
+        //     param_callback_group_);
+
+        // **Wait for Services to Be Available**
+        bool all_services_available = true;
+
+        if (!unload_controller_client_->wait_for_service(std::chrono::seconds(5)))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Service '/controller_manager/unload_controller' not available.");
+            all_services_available = false;
+        }
+
+        if (!load_controller_client_->wait_for_service(std::chrono::seconds(5)))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Service '/controller_manager/load_controller' not available.");
+            all_services_available = false;
+        }
+
+        if (!switch_controller_client_->wait_for_service(std::chrono::seconds(5)))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Service '/controller_manager/switch_controller' not available.");
+            all_services_available = false;
+        }
+
+        if (!configure_controller_client_->wait_for_service(std::chrono::seconds(5)))
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Service '/controller_manager/configure_controller' not available.");
+            all_services_available = false;
+        }
+
+        // if (!get_parameters_client_->wait_for_service(std::chrono::seconds(5)))
+        // {
+        //     RCLCPP_ERROR(node_->get_logger(), "Service 'lite6_traj_controller/get_parameters' not available.");
+        //     all_services_available = false;
+        // }
+
+        // if (!set_parameters_client_->wait_for_service(std::chrono::seconds(5)))
+        // {
+        //     RCLCPP_ERROR(node_->get_logger(), "Service 'lite6_traj_controller/set_parameters' not available.");
+        //     all_services_available = false;
+        // }
+
+        if (!all_services_available)
+        {
+            RCLCPP_ERROR(node_->get_logger(), "Not all required services are available. Shutting down.");
+            rclcpp::shutdown();
+            return;
+        }
+
+        // Initialize Action Servers with Reentrant Callback Group
         single_action_server_ = rclcpp_action::create_server<MoveManipulator>(
             node_,
             planner_prefix_ + "move_manipulator",
             std::bind(&MoveManipulatorActionServer::handle_single_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_single_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_single_accepted, this, std::placeholders::_1));
+            std::bind(&MoveManipulatorActionServer::handle_single_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
 
         sequence_action_server_ = rclcpp_action::create_server<MoveManipulatorSequence>(
             node_,
             planner_prefix_ + "move_manipulator_sequence",
             std::bind(&MoveManipulatorActionServer::handle_sequence_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_sequence_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_sequence_accepted, this, std::placeholders::_1));
+            std::bind(&MoveManipulatorActionServer::handle_sequence_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
 
         plan_action_server_ = rclcpp_action::create_server<PlanManipulator>(
             node_,
             planner_prefix_ + "plan_manipulator",
             std::bind(&MoveManipulatorActionServer::handle_plan_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_plan_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_plan_accepted, this, std::placeholders::_1));
+            std::bind(&MoveManipulatorActionServer::handle_plan_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
 
         execute_action_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
             planner_prefix_ + "execute_manipulator_traj",
             std::bind(&MoveManipulatorActionServer::handle_execute_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_execute_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_execute_accepted, this, std::placeholders::_1));
+            std::bind(&MoveManipulatorActionServer::handle_execute_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
 
-        /**
-         * The stop_motion action server is used to stop the current execution of exection_action_server if needed.
-         * By itself, the traj_controller keeps executing the trajectory even it received the cancel command. But if it
-         * receives a new trajectory to execute it switches to it. The stop server just sends a new trajectory with
-         * the current position and the velocity at zero. This is not very elegant, but it seems not to cause extreme
-         * move reactions in the manipulator moves.
-         */
         stop_motion_server_ = rclcpp_action::create_server<ExecuteTrajectory>(
             node_,
             planner_prefix_ + "stop_motion",
             std::bind(&MoveManipulatorActionServer::handle_stop_goal, this, std::placeholders::_1, std::placeholders::_2),
             std::bind(&MoveManipulatorActionServer::handle_stop_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_stop_accept, this, std::placeholders::_1));
+            std::bind(&MoveManipulatorActionServer::handle_stop_accept, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
 
-        reset_controller_server_ = rclcpp_action::create_server<ResetTrajController>(
+        unload_traj_controller_server_ = rclcpp_action::create_server<UnloadTrajController>(
             node_,
-            planner_prefix_ + "reset_trajectory_controller", // e.g. "reset_trajectory_controller"
-            std::bind(&MoveManipulatorActionServer::handle_reset_goal, this, std::placeholders::_1, std::placeholders::_2),
-            std::bind(&MoveManipulatorActionServer::handle_reset_cancel, this, std::placeholders::_1),
-            std::bind(&MoveManipulatorActionServer::handle_reset_accepted, this, std::placeholders::_1));
+            planner_prefix_ + "unload_trajectory_controller",
+            std::bind(&MoveManipulatorActionServer::handle_unload_traj_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&MoveManipulatorActionServer::handle_unload_traj_cancel, this, std::placeholders::_1),
+            std::bind(&MoveManipulatorActionServer::handle_unload_traj_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
+
+        load_traj_controller_server_ = rclcpp_action::create_server<LoadTrajController>(
+            node_,
+            planner_prefix_ + "load_trajectory_controller",
+            std::bind(&MoveManipulatorActionServer::handle_load_traj_goal, this, std::placeholders::_1, std::placeholders::_2),
+            std::bind(&MoveManipulatorActionServer::handle_load_traj_cancel, this, std::placeholders::_1),
+            std::bind(&MoveManipulatorActionServer::handle_load_traj_accepted, this, std::placeholders::_1),
+            rcl_action_server_get_default_options(),
+            action_callback_group_);
     }
 
 private:
@@ -91,33 +193,41 @@ private:
     std::shared_ptr<PlannerInterface> planner_;
     std::string planner_prefix_;
 
+    // Callback Groups
+    rclcpp::CallbackGroup::SharedPtr action_callback_group_;
+    rclcpp::CallbackGroup::SharedPtr param_callback_group_;
+
+    // Action Servers
     rclcpp_action::Server<MoveManipulator>::SharedPtr single_action_server_;
     rclcpp_action::Server<MoveManipulatorSequence>::SharedPtr sequence_action_server_;
 
     rclcpp_action::Server<PlanManipulator>::SharedPtr plan_action_server_;
     rclcpp_action::Server<ExecuteTrajectory>::SharedPtr execute_action_server_;
     rclcpp_action::Server<ExecuteTrajectory>::SharedPtr stop_motion_server_;
+    rclcpp_action::Server<UnloadTrajController>::SharedPtr unload_traj_controller_server_;
+    rclcpp_action::Server<LoadTrajController>::SharedPtr load_traj_controller_server_;
 
-    rclcpp_action::Server<ResetTrajController>::SharedPtr reset_controller_server_;
+    // Service Clients
+    rclcpp::Client<controller_manager_msgs::srv::UnloadController>::SharedPtr unload_controller_client_;
+    rclcpp::Client<controller_manager_msgs::srv::LoadController>::SharedPtr load_controller_client_;
+    rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedPtr switch_controller_client_;
+    rclcpp::Client<controller_manager_msgs::srv::ConfigureController>::SharedPtr configure_controller_client_;
 
     // -------------------------------------
     // MoveManipulator callbacks
     // -------------------------------------
 
     rclcpp_action::GoalResponse handle_single_goal(
-        const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const MoveManipulator::Goal> goal)
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
+        [[maybe_unused]] std::shared_ptr<const MoveManipulator::Goal> goal)
     {
-        (void)uuid;
-        (void)goal;
         RCLCPP_INFO(node_->get_logger(), "Received single MoveManipulator goal");
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
     rclcpp_action::CancelResponse handle_single_cancel(
-        const std::shared_ptr<GoalHandleMoveManipulator> goal_handle)
+        [[maybe_unused]] const std::shared_ptr<GoalHandleMoveManipulator> goal_handle)
     {
-        (void)goal_handle;
         RCLCPP_INFO(node_->get_logger(), "Received request to cancel single move goal");
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -183,18 +293,16 @@ private:
     // -------------------------------------
 
     rclcpp_action::GoalResponse handle_sequence_goal(
-        const rclcpp_action::GoalUUID &uuid,
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
         std::shared_ptr<const MoveManipulatorSequence::Goal> goal)
     {
-        (void)uuid;
         RCLCPP_INFO(node_->get_logger(), "Received MoveManipulatorSequence goal with %zu moves", goal->goals.size());
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
     rclcpp_action::CancelResponse handle_sequence_cancel(
-        const std::shared_ptr<GoalHandleMoveManipulatorSequence> goal_handle)
+        [[maybe_unused]] const std::shared_ptr<GoalHandleMoveManipulatorSequence> goal_handle)
     {
-        (void)goal_handle;
         RCLCPP_INFO(node_->get_logger(), "Received request to cancel sequence goal");
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -260,20 +368,17 @@ private:
     // -------------------------------------
 
     rclcpp_action::GoalResponse handle_plan_goal(
-        const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const PlanManipulator::Goal> goal_msg)
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
+        [[maybe_unused]] std::shared_ptr<const PlanManipulator::Goal> goal_msg)
     {
         RCLCPP_INFO(node_->get_logger(), "Received PlanManipulator action goal request");
-        (void)uuid;
-        (void)goal_msg;
         // Optionally validate goal_msg->goal ...
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
     rclcpp_action::CancelResponse handle_plan_cancel(
-        const std::shared_ptr<GoalHandlePlanManipulator> goal_handle)
+        [[maybe_unused]] const std::shared_ptr<GoalHandlePlanManipulator> goal_handle)
     {
-        (void)goal_handle;
         RCLCPP_INFO(node_->get_logger(), "Received request to cancel PlanManipulator goal");
         // For a pure planning action, you might accept or reject cancellation
         return rclcpp_action::CancelResponse::ACCEPT;
@@ -335,10 +440,9 @@ private:
     // -------------------------------------
 
     rclcpp_action::GoalResponse handle_execute_goal(
-        const rclcpp_action::GoalUUID &uuid,
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
         std::shared_ptr<const ExecuteTrajectory::Goal> goal)
     {
-        (void)uuid;
         if (goal->trajectory.joint_trajectory.points.empty())
         {
             RCLCPP_WARN(node_->get_logger(), "Received an empty trajectory");
@@ -350,9 +454,8 @@ private:
     }
 
     rclcpp_action::CancelResponse handle_execute_cancel(
-        const std::shared_ptr<GoalHandleExecuteTrajectory> goal_handle)
+        [[maybe_unused]] const std::shared_ptr<GoalHandleExecuteTrajectory> goal_handle)
     {
-        (void)goal_handle;
         RCLCPP_INFO(node_->get_logger(), "Received request to cancel trajectory execution");
         return rclcpp_action::CancelResponse::ACCEPT;
     }
@@ -387,14 +490,6 @@ private:
             goal_handle->abort(result);
         }
     }
-
-    /**
-     * The stop_motion action servers takes as input any traj and just stops the motion of the manipulator
-     * by overriding the current trajectory execution by traj_controller with the current position,
-     * zero velocity, and deceleration time. The robot will try to "spring back" to the position it was
-     * when the stop command is issued within the deceleration time. The higher the time, the smoother
-     * the stop, but the higher the move lenght to decelerate and come back to the stop point.
-     */
 
     // -------------------------------------
     // StopMotion callbacks
@@ -470,19 +565,17 @@ private:
     }
 
     // -------------------------------------
-    // ResetTrajController callbacks
+    // UnloadTrajController callbacks
     // -------------------------------------
 
-    rclcpp_action::GoalResponse handle_reset_goal(
-        const rclcpp_action::GoalUUID &uuid,
-        std::shared_ptr<const ResetTrajController::Goal> goal)
+    rclcpp_action::GoalResponse handle_unload_traj_goal(
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
+        std::shared_ptr<const UnloadTrajController::Goal> goal)
     {
         RCLCPP_INFO(node_->get_logger(),
-                    "Received ResetTrajController goal request for controller: %s",
+                    "Received UnloadTrajController goal request for controller: %s",
                     goal->controller_name.c_str());
 
-        (void)uuid; // not used
-        // Optionally validate the controller name
         if (goal->controller_name.empty())
         {
             RCLCPP_WARN(node_->get_logger(), "Controller name is empty. Rejecting.");
@@ -492,448 +585,398 @@ private:
         return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
     }
 
-    rclcpp_action::CancelResponse handle_reset_cancel(
-        const std::shared_ptr<GoalHandleResetTrajController> goal_handle)
+    rclcpp_action::CancelResponse handle_unload_traj_cancel(
+        [[maybe_unused]] const std::shared_ptr<GoalHandleUnloadTrajController> goal_handle)
     {
         RCLCPP_INFO(node_->get_logger(),
-                    "Received request to CANCEL ResetTrajController goal");
-        // For this operation, we can either allow or deny cancel.
-        // We'll accept for convenience:
-        (void)goal_handle;
+                    "Received request to CANCEL UnloadTrajController goal");
         return rclcpp_action::CancelResponse::ACCEPT;
     }
 
-    void handle_reset_accepted(
-        const std::shared_ptr<GoalHandleResetTrajController> goal_handle)
+    void handle_unload_traj_accepted(
+        const std::shared_ptr<GoalHandleUnloadTrajController> goal_handle)
     {
-        // Execute in a separate thread
-        std::thread{
-            std::bind(&MoveManipulatorActionServer::execute_reset_traj_controller, this, goal_handle)}
-            .detach();
+        std::thread{std::bind(&MoveManipulatorActionServer::execute_unload_traj_controller, this, goal_handle)}.detach();
     }
 
-    void execute_reset_traj_controller(
-        const std::shared_ptr<GoalHandleResetTrajController> &goal_handle)
+    void execute_unload_traj_controller(
+        const std::shared_ptr<GoalHandleUnloadTrajController> &goal_handle)
     {
-        auto result = std::make_shared<ResetTrajController::Result>();
-        auto feedback = std::make_shared<ResetTrajController::Feedback>();
-
-        // 1) Check if goal is canceled right away
-        if (goal_handle->is_canceling())
-        {
-            RCLCPP_WARN(node_->get_logger(), "ResetTrajController goal canceled before execution started.");
-            result->success = false;
-            result->message = "Canceled before execution";
-            goal_handle->canceled(result);
-            return;
-        }
-
-        // 2) Extract controller name
+        auto result = std::make_shared<UnloadTrajController::Result>();
         std::string controller_name = goal_handle->get_goal()->controller_name;
-        RCLCPP_INFO(node_->get_logger(), "Executing reset for controller: %s", controller_name.c_str());
 
-        // Feedback can be updated in small increments. For example:
-        feedback->progress = 0.1f;
-        goal_handle->publish_feedback(feedback);
+        // 1) Deactivate the controller
+        deactivateControllerAsync(
+            controller_name,
+            [this, goal_handle, result, controller_name]()
+            {
+                // 2) Unload the controller
+                unloadControllerAsync(
+                    controller_name,
+                    [this, goal_handle, result, controller_name]()
+                    {
+                        result->success = true;
+                        result->message = "Controller unloaded successfully.";
+                        goal_handle->succeed(result);
+                    },
+                    [goal_handle, result, controller_name](const std::string &err)
+                    {
+                        result->success = false;
+                        result->message = "Unload error: " + err;
+                        goal_handle->abort(result);
+                    });
+            },
+            [goal_handle, result, controller_name](const std::string &err)
+            {
+                result->success = false;
+                result->message = "Deactivate error: " + err;
+                goal_handle->abort(result);
+            });
+    }
 
-        // 3) Retrieve parameters from the running controller
-        auto param_vector = getControllerParams(node_, controller_name);
-        if (param_vector.empty())
+    // -------------------------------------
+    // LoadTrajController callbacks
+    // -------------------------------------
+
+    rclcpp_action::GoalResponse handle_load_traj_goal(
+        [[maybe_unused]] const rclcpp_action::GoalUUID &uuid,
+        std::shared_ptr<const LoadTrajController::Goal> goal)
+    {
+        RCLCPP_INFO(node_->get_logger(),
+                    "Received LoadTrajController goal request for controller: %s",
+                    goal->controller_name.c_str());
+
+        if (goal->controller_name.empty())
         {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to retrieve params from controller: %s", controller_name.c_str());
-            result->success = false;
-            result->message = "Failed to get params";
-            goal_handle->abort(result);
-            return;
+            RCLCPP_WARN(node_->get_logger(), "Controller name is empty. Rejecting.");
+            return rclcpp_action::GoalResponse::REJECT;
         }
-        feedback->progress = 0.3f;
-        goal_handle->publish_feedback(feedback);
 
-        // 4) Unload controller
-        if (!unloadController(node_, controller_name))
-        {
-            RCLCPP_ERROR(node_->get_logger(), "Could not unload controller: %s", controller_name.c_str());
-            result->success = false;
-            result->message = "Unload failed";
-            goal_handle->abort(result);
-            return;
-        }
-        feedback->progress = 0.5f;
-        goal_handle->publish_feedback(feedback);
+        return rclcpp_action::GoalResponse::ACCEPT_AND_EXECUTE;
+    }
 
-        // 5) Load controller
-        if (!loadController(node_, controller_name))
-        {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to load controller: %s", controller_name.c_str());
-            result->success = false;
-            result->message = "Load failed";
-            goal_handle->abort(result);
-            return;
-        }
-        feedback->progress = 0.6f;
-        goal_handle->publish_feedback(feedback);
+    rclcpp_action::CancelResponse handle_load_traj_cancel(
+        [[maybe_unused]] const std::shared_ptr<GoalHandleLoadTrajController> goal_handle)
+    {
+        RCLCPP_INFO(node_->get_logger(),
+                    "Received request to CANCEL LoadTrajController goal");
+        return rclcpp_action::CancelResponse::ACCEPT;
+    }
 
-        // 6) Reapply the saved parameters
-        if (!configureControllerParams(node_, controller_name, param_vector))
-        {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to set parameters on controller: %s", controller_name.c_str());
-            result->success = false;
-            result->message = "Set params failed";
-            goal_handle->abort(result);
-            return;
-        }
-        feedback->progress = 0.8f;
-        goal_handle->publish_feedback(feedback);
+    void handle_load_traj_accepted(
+        const std::shared_ptr<GoalHandleLoadTrajController> goal_handle)
+    {
+        std::thread{std::bind(&MoveManipulatorActionServer::execute_load_traj_controller, this, goal_handle)}.detach();
+    }
 
-        // 7) Activate the controller
-        if (!activateController(node_, controller_name))
-        {
-            RCLCPP_ERROR(node_->get_logger(), "Failed to activate controller: %s", controller_name.c_str());
-            result->success = false;
-            result->message = "Activate failed";
-            goal_handle->abort(result);
-            return;
-        }
-        feedback->progress = 1.0f;
-        goal_handle->publish_feedback(feedback);
+    void execute_load_traj_controller(
+        const std::shared_ptr<GoalHandleLoadTrajController> &goal_handle)
+    {
+        auto result = std::make_shared<LoadTrajController::Result>();
+        std::string controller_name = goal_handle->get_goal()->controller_name;
 
-        // 8) Succeed
-        result->success = true;
-        result->message = "Controller reset successful!";
-        RCLCPP_INFO(node_->get_logger(), "Controller %s was reset successfully.", controller_name.c_str());
-        goal_handle->succeed(result);
+        // 1) Load the controller
+        loadControllerAsync(
+            controller_name,
+            [this, goal_handle, result, controller_name]()
+            {
+                // 2) Configure the controller
+                configureControllerAsync(
+                    controller_name,
+                    [this, goal_handle, result, controller_name]()
+                    {
+                        // 3) Activate the controller
+                        activateControllerAsync(
+                            controller_name,
+                            [this, goal_handle, result, controller_name]()
+                            {
+                                result->success = true;
+                                result->message = "Controller loaded and activated successfully.";
+                                goal_handle->succeed(result);
+                            },
+                            [goal_handle, result, controller_name](const std::string &err)
+                            {
+                                result->success = false;
+                                result->message = "Activate error: " + err;
+                                goal_handle->abort(result);
+                            });
+                    },
+                    [goal_handle, result, controller_name](const std::string &err)
+                    {
+                        result->success = false;
+                        result->message = "Configure error: " + err;
+                        goal_handle->abort(result);
+                    });
+            },
+            [goal_handle, result, controller_name](const std::string &err)
+            {
+                result->success = false;
+                result->message = "Load error: " + err;
+                goal_handle->abort(result);
+            });
     }
 
     // -------------------------------------
     // Helpers:
     // -------------------------------------
 
-    // A structure to store parameter name-value pairs.
-    struct ParamData
+    void unloadControllerAsync(
+        const std::string &controller_name,
+        std::function<void()> on_success,
+        std::function<void(const std::string &)> on_error)
     {
-        std::string name;
-        rcl_interfaces::msg::ParameterValue value;
-    };
-
-    // Retrieve all parameters from the trajectory controller
-    std::vector<ParamData> getControllerParams(
-        rclcpp::Node::SharedPtr node,
-        const std::string &controller_name)
-    {
-        // Name of the service: <controller_name>/get_parameters
-        auto client = node->create_client<rcl_interfaces::srv::GetParameters>(
-            controller_name + "/get_parameters");
-            
-        auto request = std::make_shared<rcl_interfaces::srv::GetParameters::Request>();
-
-        // Param names. TODO: try to use the dump function on a string and parse it?
-        request->names = {
-            // Basic
-            "action_monitor_rate",
-            "allow_integration_in_goal_trajectories",
-            "allow_nonzero_velocity_at_trajectory_end",
-            "allow_partial_joints_goal",
-            "cmd_timeout",
-            "command_interfaces",
-            "command_joints",
-            "joints",
-            "interface_name",
-            "interpolation_method",
-            "open_loop_control",
-            "robot_description",
-            "set_last_command_interface_value_as_state_on_activation",
-            "state_publish_rate",
-            "update_rate",
-            "use_sim_time",
-
-            // Constraints
-            "constraints.goal_time",
-            "constraints.stopped_velocity_tolerance",
-            "constraints.joint1.goal",
-            "constraints.joint1.trajectory",
-            "constraints.joint2.goal",
-            "constraints.joint2.trajectory",
-            "constraints.joint3.goal",
-            "constraints.joint3.trajectory",
-            "constraints.joint4.goal",
-            "constraints.joint4.trajectory",
-            "constraints.joint5.goal",
-            "constraints.joint5.trajectory",
-            "constraints.joint6.goal",
-            "constraints.joint6.trajectory",
-
-            // Gains
-            "gains.joint1.p",
-            "gains.joint1.i",
-            "gains.joint1.d",
-            "gains.joint1.i_clamp",
-            "gains.joint1.ff_velocity_scale",
-            "gains.joint1.normalize_error",
-            "gains.joint1.angle_wraparound",
-            "gains.joint2.p",
-            "gains.joint2.i",
-            "gains.joint2.d",
-            "gains.joint2.i_clamp",
-            "gains.joint2.ff_velocity_scale",
-            "gains.joint2.normalize_error",
-            "gains.joint2.angle_wraparound",
-            "gains.joint3.p",
-            "gains.joint3.i",
-            "gains.joint3.d",
-            "gains.joint3.i_clamp",
-            "gains.joint3.ff_velocity_scale",
-            "gains.joint3.normalize_error",
-            "gains.joint3.angle_wraparound",
-            "gains.joint4.p",
-            "gains.joint4.i",
-            "gains.joint4.d",
-            "gains.joint4.i_clamp",
-            "gains.joint4.ff_velocity_scale",
-            "gains.joint4.normalize_error",
-            "gains.joint4.angle_wraparound",
-            "gains.joint5.p",
-            "gains.joint5.i",
-            "gains.joint5.d",
-            "gains.joint5.i_clamp",
-            "gains.joint5.ff_velocity_scale",
-            "gains.joint5.normalize_error",
-            "gains.joint5.angle_wraparound",
-            "gains.joint6.p",
-            "gains.joint6.i",
-            "gains.joint6.d",
-            "gains.joint6.i_clamp",
-            "gains.joint6.ff_velocity_scale",
-            "gains.joint6.normalize_error",
-            "gains.joint6.angle_wraparound",
-        };
-        std::vector<ParamData> retrieved_params;
-
-        if (client->wait_for_service(std::chrono::seconds(5)))
-        {
-            auto future = client->async_send_request(request);
-            if (rclcpp::spin_until_future_complete(node, future) ==
-                rclcpp::FutureReturnCode::SUCCESS)
-            {
-                auto response = future.get();
-                // Store them in a vector
-                for (size_t i = 0; i < response->values.size(); ++i)
-                {
-                    ParamData pd;
-                    pd.name = request->names[i];
-                    pd.value = response->values[i];
-                    retrieved_params.push_back(pd);
-                }
-            }
-            else
-            {
-                RCLCPP_ERROR(
-                    node->get_logger(),
-                    "Failed to retrieve parameters from controller: %s",
+        RCLCPP_INFO(node_->get_logger(),
+                    "[unloadControllerAsync] Called for controller: '%s'",
                     controller_name.c_str());
-            }
-        }
-        else
+
+        if (!unload_controller_client_->service_is_ready())
         {
-            RCLCPP_ERROR(
-                node->get_logger(),
-                "Service %s/get_parameters not available",
-                controller_name.c_str());
+            std::string msg = "[unloadControllerAsync] Service '/controller_manager/unload_controller' unavailable";
+            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+            on_error(msg);
+            return;
         }
-
-        return retrieved_params;
-    }
-
-    bool unloadController(
-        rclcpp::Node::SharedPtr node,
-        const std::string &controller_name)
-    {
-        // Service: /controller_manager/unload_controller
-        auto client = node->create_client<controller_manager_msgs::srv::UnloadController>(
-            "/controller_manager/unload_controller");
 
         auto request = std::make_shared<controller_manager_msgs::srv::UnloadController::Request>();
         request->name = controller_name;
 
-        if (client->wait_for_service(std::chrono::seconds(5)))
-        {
-            auto future = client->async_send_request(request);
-            if (rclcpp::spin_until_future_complete(node, future) ==
-                rclcpp::FutureReturnCode::SUCCESS)
-            {
-                if (future.get()->ok)
-                {
-                    RCLCPP_INFO(node->get_logger(), "Controller %s unloaded successfully.", controller_name.c_str());
-                    return true;
-                }
-                else
-                {
-                    RCLCPP_ERROR(node->get_logger(), "Failed to unload controller %s.", controller_name.c_str());
-                }
-            }
-            else
-            {
-                RCLCPP_ERROR(node->get_logger(), "Failed to call unload_controller service.");
-            }
-        }
-        else
-        {
-            RCLCPP_ERROR(node->get_logger(), "Service unload_controller not available.");
-        }
-        return false;
+        unload_controller_client_->async_send_request(request,
+                                                      [this, controller_name, on_success, on_error](rclcpp::Client<controller_manager_msgs::srv::UnloadController>::SharedFuture future_response)
+                                                      {
+                                                          auto response = future_response.get();
+                                                          if (!response)
+                                                          {
+                                                              std::string msg = "[unloadControllerAsync] Null response for " + controller_name;
+                                                              RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                              on_error(msg);
+                                                              return;
+                                                          }
+
+                                                          if (response->ok)
+                                                          {
+                                                              RCLCPP_INFO(node_->get_logger(), "[unloadControllerAsync] SUCCESS: Unloaded '%s'", controller_name.c_str());
+                                                              on_success();
+                                                          }
+                                                          else
+                                                          {
+                                                              std::string msg = "[unloadControllerAsync] Failed to unload " + controller_name;
+                                                              RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                              on_error(msg);
+                                                          }
+                                                      });
+
+        RCLCPP_INFO(node_->get_logger(), "[unloadControllerAsync] Request sent, awaiting response...");
     }
 
-    bool loadController(
-        rclcpp::Node::SharedPtr node,
-        const std::string &controller_name)
+    void loadControllerAsync(
+        const std::string &controller_name,
+        std::function<void()> on_success,
+        std::function<void(const std::string &)> on_error)
     {
-        // Service: /controller_manager/load_controller
-        auto client = node->create_client<controller_manager_msgs::srv::LoadController>(
-            "/controller_manager/load_controller");
+        RCLCPP_INFO(node_->get_logger(),
+                    "[loadControllerAsync] Called for controller: '%s'",
+                    controller_name.c_str());
+
+        if (!load_controller_client_->service_is_ready())
+        {
+            std::string msg = "[loadControllerAsync] Service '/controller_manager/load_controller' unavailable for: " + controller_name;
+            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+            on_error(msg);
+            return;
+        }
 
         auto request = std::make_shared<controller_manager_msgs::srv::LoadController::Request>();
         request->name = controller_name;
 
-        if (client->wait_for_service(std::chrono::seconds(5)))
-        {
-            auto future = client->async_send_request(request);
-            if (rclcpp::spin_until_future_complete(node, future) ==
-                rclcpp::FutureReturnCode::SUCCESS)
-            {
-                if (future.get()->ok)
-                {
-                    RCLCPP_INFO(node->get_logger(), "Loaded controller %s successfully.", controller_name.c_str());
-                    return true;
-                }
-                else
-                {
-                    RCLCPP_ERROR(node->get_logger(), "Failed to load controller %s.", controller_name.c_str());
-                }
-            }
-            else
-            {
-                RCLCPP_ERROR(node->get_logger(), "Failed to call load_controller service.");
-            }
-        }
-        else
-        {
-            RCLCPP_ERROR(node->get_logger(), "Service load_controller not available.");
-        }
-        return false;
+        load_controller_client_->async_send_request(request,
+                                                    [this, controller_name, on_success, on_error](rclcpp::Client<controller_manager_msgs::srv::LoadController>::SharedFuture future_response)
+                                                    {
+                                                        auto response = future_response.get();
+                                                        if (!response)
+                                                        {
+                                                            std::string msg = "[loadControllerAsync] Null response for " + controller_name;
+                                                            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                            on_error(msg);
+                                                            return;
+                                                        }
+
+                                                        if (response->ok)
+                                                        {
+                                                            RCLCPP_INFO(node_->get_logger(), "[loadControllerAsync] SUCCESS: Loaded '%s'", controller_name.c_str());
+                                                            on_success();
+                                                        }
+                                                        else
+                                                        {
+                                                            std::string msg = "[loadControllerAsync] Failed to load " + controller_name;
+                                                            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                            on_error(msg);
+                                                        }
+                                                    });
+
+        RCLCPP_INFO(node_->get_logger(), "[loadControllerAsync] Request sent, awaiting response...");
     }
 
-    bool configureControllerParams(
-        rclcpp::Node::SharedPtr node,
+    void activateControllerAsync(
         const std::string &controller_name,
-        const std::vector<ParamData> &params)
+        std::function<void()> on_success,
+        std::function<void(const std::string &)> on_error)
     {
-        // Service: /<controller_name>/set_parameters
-        auto client = node->create_client<rcl_interfaces::srv::SetParameters>(
-            controller_name + "/set_parameters");
-
-        // Transform ParamData into SetParameters::Request
-        auto request = std::make_shared<rcl_interfaces::srv::SetParameters::Request>();
-        for (const auto &pd : params)
-        {
-            rclcpp::Parameter rcl_param(pd.name);
-
-            // Convert rcl_interfaces::msg::ParameterValue -> rclcpp::Parameter
-            switch (pd.value.type)
-            {
-            case rcl_interfaces::msg::ParameterType::PARAMETER_BOOL:
-                rcl_param = rclcpp::Parameter(pd.name, pd.value.bool_value);
-                break;
-            case rcl_interfaces::msg::ParameterType::PARAMETER_INTEGER:
-                rcl_param = rclcpp::Parameter(pd.name, static_cast<int64_t>(pd.value.integer_value));
-                break;
-            case rcl_interfaces::msg::ParameterType::PARAMETER_DOUBLE:
-                rcl_param = rclcpp::Parameter(pd.name, pd.value.double_value);
-                break;
-            case rcl_interfaces::msg::ParameterType::PARAMETER_STRING:
-                rcl_param = rclcpp::Parameter(pd.name, pd.value.string_value);
-                break;
-            // Handle arrays if needed...
-            default:
-                RCLCPP_WARN(node->get_logger(), "Parameter type for '%s' not handled.", pd.name.c_str());
-                continue;
-            }
-            request->parameters.push_back(rcl_param.to_parameter_msg());
-        }
-
-        if (client->wait_for_service(std::chrono::seconds(5)))
-        {
-            auto future = client->async_send_request(request);
-            if (rclcpp::spin_until_future_complete(node, future) ==
-                rclcpp::FutureReturnCode::SUCCESS)
-            {
-                RCLCPP_INFO(
-                    node->get_logger(),
-                    "Controller %s configured with saved parameters.",
+        RCLCPP_INFO(node_->get_logger(),
+                    "[activateControllerAsync] Called for controller: '%s'",
                     controller_name.c_str());
-                return true;
-            }
-            else
-            {
-                RCLCPP_ERROR(node->get_logger(), "Failed to set parameters for %s.", controller_name.c_str());
-            }
-        }
-        else
-        {
-            RCLCPP_ERROR(
-                node->get_logger(),
-                "Service %s/set_parameters not available.",
-                controller_name.c_str());
-        }
-        return false;
-    }
 
-    bool activateController(
-        rclcpp::Node::SharedPtr node,
-        const std::string &controller_name)
-    {
-        // /controller_manager/switch_controller
-        auto client = node->create_client<controller_manager_msgs::srv::SwitchController>(
-            "/controller_manager/switch_controller");
+        if (!switch_controller_client_->service_is_ready())
+        {
+            std::string msg = "[activateControllerAsync] Service '/controller_manager/switch_controller' unavailable";
+            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+            on_error(msg);
+            return;
+        }
 
         auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
         request->activate_controllers.push_back(controller_name);
         request->deactivate_controllers.clear();
-        // If there's an old controller to stop, add it to stop_controllers
-        // request->stop_controllers.push_back("old_controller_name");
-        request->strictness = controller_manager_msgs::srv::SwitchController::Request::STRICT;
-        // Options:
-        // BEST_EFFORT = tries to switch but won't fail if there's an issue
-        // STRICT = must succeed or the call fails
-
-        // If you want the controller to start immediately:
-        request->start_asap = false; 
+        request->strictness = request->STRICT;
+        request->start_asap = false;
         request->timeout.sec = 0;
         request->timeout.nanosec = 0;
 
-        if (client->wait_for_service(std::chrono::seconds(5)))
+        switch_controller_client_->async_send_request(request,
+                                                      [this, controller_name, on_success, on_error](rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedFuture future_response)
+                                                      {
+                                                          RCLCPP_INFO(node_->get_logger(), "[activateControllerAsync] Received response for '%s'.", controller_name.c_str());
+
+                                                          auto response = future_response.get();
+                                                          if (!response)
+                                                          {
+                                                              std::string msg = "[activateControllerAsync] Null response for " + controller_name;
+                                                              RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                              on_error(msg);
+                                                              return;
+                                                          }
+
+                                                          if (response->ok)
+                                                          {
+                                                              RCLCPP_INFO(node_->get_logger(), "[activateControllerAsync] SUCCESS: Activated '%s'", controller_name.c_str());
+                                                              on_success();
+                                                          }
+                                                          else
+                                                          {
+                                                              std::string msg = "[activateControllerAsync] Failed to activate " + controller_name;
+                                                              RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                                                              on_error(msg);
+                                                          }
+                                                      });
+
+        RCLCPP_INFO(node_->get_logger(), "[activateControllerAsync] Request sent, awaiting response...");
+    }
+
+    void deactivateControllerAsync(
+        const std::string &controller_name,
+        std::function<void()> on_success,
+        std::function<void(const std::string &)> on_error)
+    {
+        RCLCPP_INFO(node_->get_logger(),
+                    "[deactivateControllerAsync] Called for controller: '%s'",
+                    controller_name.c_str());
+
+        // Check if the service is ready
+        if (!switch_controller_client_->service_is_ready())
         {
-            auto future = client->async_send_request(request);
-            if (rclcpp::spin_until_future_complete(node, future) ==
-                rclcpp::FutureReturnCode::SUCCESS)
+            std::string msg = "[deactivateControllerAsync] Service '/controller_manager/switch_controller' unavailable";
+            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+            on_error(msg);
+            return;
+        }
+
+        // Prepare the SwitchController request
+        auto request = std::make_shared<controller_manager_msgs::srv::SwitchController::Request>();
+        request->activate_controllers.clear();                      // We are not starting any new controllers
+        request->deactivate_controllers.push_back(controller_name); // We want to deactivate/stop this controller
+        request->strictness = request->STRICT;                      // STRICT means all requested switches must succeed
+        request->start_asap = false;                                // You can set this to true or false depending on your usage
+        request->timeout.sec = 0;                                   // Timeout for the switch
+        request->timeout.nanosec = 0;
+
+        // Send asynchronous request
+        switch_controller_client_->async_send_request(
+            request,
+            [this, controller_name, on_success, on_error](rclcpp::Client<controller_manager_msgs::srv::SwitchController>::SharedFuture future_response)
             {
-                if (future.get()->ok)
+                RCLCPP_INFO(node_->get_logger(),
+                            "[deactivateControllerAsync] Received response for '%s'.",
+                            controller_name.c_str());
+
+                auto response = future_response.get();
+                if (!response)
                 {
-                    RCLCPP_INFO(node->get_logger(), "Controller %s activated.", controller_name.c_str());
-                    return true;
+                    std::string msg = "[deactivateControllerAsync] Null response for " + controller_name;
+                    RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                    on_error(msg);
+                    return;
+                }
+
+                if (response->ok)
+                {
+                    RCLCPP_INFO(node_->get_logger(),
+                                "[deactivateControllerAsync] SUCCESS: Deactivated '%s'",
+                                controller_name.c_str());
+                    on_success();
                 }
                 else
                 {
-                    RCLCPP_ERROR(node->get_logger(), "Failed to activate controller %s.", controller_name.c_str());
+                    std::string msg = "[deactivateControllerAsync] Failed to deactivate " + controller_name;
+                    RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                    on_error(msg);
                 }
-            }
-            else
-            {
-                RCLCPP_ERROR(node->get_logger(), "Failed to call switch_controller service.");
-            }
-        }
-        else
+            });
+
+        RCLCPP_INFO(node_->get_logger(),
+                    "[deactivateControllerAsync] Request sent, awaiting response...");
+    }
+
+    void configureControllerAsync(
+        const std::string &controller_name,
+        std::function<void()> on_success,
+        std::function<void(const std::string &)> on_error)
+    {
+        RCLCPP_INFO(node_->get_logger(), "[configureControllerAsync] Configuring '%s'", controller_name.c_str());
+
+        if (!configure_controller_client_->service_is_ready())
         {
-            RCLCPP_ERROR(node->get_logger(), "Service switch_controller not available.");
+            std::string msg = "[configureControllerAsync] Service unavailable for " + controller_name;
+            RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+            on_error(msg);
+            return;
         }
-        return false;
+
+        auto request = std::make_shared<controller_manager_msgs::srv::ConfigureController::Request>();
+        request->name = controller_name;
+
+        configure_controller_client_->async_send_request(
+            request,
+            [this, controller_name, on_success, on_error](rclcpp::Client<controller_manager_msgs::srv::ConfigureController>::SharedFuture future)
+            {
+                auto response = future.get();
+                if (!response)
+                {
+                    std::string msg = "[configureControllerAsync] Null response for " + controller_name;
+                    RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                    on_error(msg);
+                    return;
+                }
+
+                if (response->ok)
+                {
+                    RCLCPP_INFO(node_->get_logger(), "[configureControllerAsync] Successfully configured '%s'", controller_name.c_str());
+                    on_success();
+                }
+                else
+                {
+                    std::string msg = "[configureControllerAsync] Failed to configure " + controller_name;
+                    RCLCPP_ERROR(node_->get_logger(), "%s", msg.c_str());
+                    on_error(msg);
+                }
+            });
     }
 };
