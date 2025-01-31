@@ -67,16 +67,6 @@ public:
             rmw_qos_profile_services_default,
             param_callback_group_);
 
-        // get_parameters_client_ = node_->create_client<rcl_interfaces::srv::GetParameters>(
-        //     "lite6_traj_controller/get_parameters",
-        //     rmw_qos_profile_services_default,
-        // param_callback_group_);
-
-        // set_parameters_client_ = node_->create_client<rcl_interfaces::srv::SetParameters>(
-        //     "lite6_traj_controller/set_parameters",
-        //     rmw_qos_profile_services_default,
-        //     param_callback_group_);
-
         // **Wait for Services to Be Available**
         bool all_services_available = true;
 
@@ -103,18 +93,6 @@ public:
             RCLCPP_ERROR(node_->get_logger(), "Service '/controller_manager/configure_controller' not available.");
             all_services_available = false;
         }
-
-        // if (!get_parameters_client_->wait_for_service(std::chrono::seconds(5)))
-        // {
-        //     RCLCPP_ERROR(node_->get_logger(), "Service 'lite6_traj_controller/get_parameters' not available.");
-        //     all_services_available = false;
-        // }
-
-        // if (!set_parameters_client_->wait_for_service(std::chrono::seconds(5)))
-        // {
-        //     RCLCPP_ERROR(node_->get_logger(), "Service 'lite6_traj_controller/set_parameters' not available.");
-        //     all_services_available = false;
-        // }
 
         if (!all_services_available)
         {
@@ -534,7 +512,7 @@ private:
         }
 
         // 2) Actually send the short stop trajectory
-        double dec_time = 0.5;
+        double dec_time = 1.0;
         bool ok = planner_->sendControlledStop(dec_time);
 
         // 3) If canceled mid-stop
