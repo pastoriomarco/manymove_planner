@@ -68,6 +68,22 @@ MoveItCppPlanner::MoveItCppPlanner(
     current_velocities_.clear();
 }
 
+// functions to let ExecuteTrajectory in action_server.cpp handle the collision check feedback
+rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr MoveItCppPlanner::getFollowJointTrajClient() const
+{
+    return follow_joint_traj_client_;
+}
+
+moveit::core::RobotModelConstPtr MoveItCppPlanner::getRobotModel() const
+{
+    return moveit_cpp_ptr_->getRobotModel();
+}
+
+std::string MoveItCppPlanner::getPlanningGroup() const
+{
+    return planning_group_;
+}
+
 // Compute Path Length
 double MoveItCppPlanner::computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const
 {
@@ -1160,7 +1176,7 @@ MoveItCppPlanner::planSequence(const manymove_planner::action::MoveManipulatorSe
 }
 
 bool MoveItCppPlanner::isStateValid(const moveit::core::RobotState *state,
-                                    const moveit::core::JointModelGroup *group)
+                                    const moveit::core::JointModelGroup *group) const
 {
     // 1. Set up collision request & result
     collision_detection::CollisionRequest collision_request;

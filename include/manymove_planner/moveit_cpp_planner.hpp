@@ -159,6 +159,32 @@ public:
      */
     bool sendControlledStopLinear(double deceleration_time = 0.25);
 
+    /**
+     * @brief Collision-check callback used by Cartesian path computations.
+     * @param state Pointer to the RobotState being tested for collisions.
+     * @param group Pointer to the JointModelGroup for which collision checks should be performed.
+     * @return True if the state is free of collisions, false otherwise.
+     *
+     * @details This function is provided as a custom validity checker for
+     * moveit::core::CartesianInterpolator::computeCartesianPath(), ensuring that
+     * intermediate states do not collide with any known obstacles or the robot
+     * itself. Without isStateValid() used as a callback function, computeCartesianPath()
+     * wouldn't check for collisions just for mesh objects, while it did for primitive objects.
+     * I couldn't figure if I missed some setting to avoid this problem, if I found some edge
+     * cases that resulted in this abnormal behavior, or if it is in fact the intended behavior
+     * of computeCartesianPath(). Regardless, this seems to solve the issue.
+     * The function performs a collision check on the given @p state for the
+     * specified joint model group. It uses a read only locked version of the current
+     * Planning Scene to verify whether the @p state is in collision. If a collision is
+     * detected, the function logs a warning and returns false. Otherwise, it returns true.
+     */
+    bool isStateValid(const moveit::core::RobotState *state, const moveit::core::JointModelGroup *group) const;
+
+    rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr getFollowJointTrajClient() const;
+
+    moveit::core::RobotModelConstPtr getRobotModel() const;
+    std::string getPlanningGroup() const;
+
 private:
     /**
      * @brief Compute the total path length of a given trajectory.
@@ -240,27 +266,6 @@ private:
      * @return A moveit_msgs::msg::RobotTrajectory representation of the same trajectory.
      */
     moveit_msgs::msg::RobotTrajectory convertToMsg(const robot_trajectory::RobotTrajectory &trajectory) const;
-
-    /**
-     * @brief Collision-check callback used by Cartesian path computations.
-     * @param state Pointer to the RobotState being tested for collisions.
-     * @param group Pointer to the JointModelGroup for which collision checks should be performed.
-     * @return True if the state is free of collisions, false otherwise.
-     *
-     * @details This function is provided as a custom validity checker for
-     * moveit::core::CartesianInterpolator::computeCartesianPath(), ensuring that
-     * intermediate states do not collide with any known obstacles or the robot
-     * itself. Without isStateValid() used as a callback function, computeCartesianPath()
-     * wouldn't check for collisions just for mesh objects, while it did for primitive objects.
-     * I couldn't figure if I missed some setting to avoid this problem, if I found some edge
-     * cases that resulted in this abnormal behavior, or if it is in fact the intended behavior
-     * of computeCartesianPath(). Regardless, this seems to solve the issue.
-     * The function performs a collision check on the given @p state for the
-     * specified joint model group. It uses a read only locked version of the current
-     * Planning Scene to verify whether the @p state is in collision. If a collision is
-     * detected, the function logs a warning and returns false. Otherwise, it returns true.
-     */
-    bool isStateValid(const moveit::core::RobotState *state, const moveit::core::JointModelGroup *group);
 
     void jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg);
 

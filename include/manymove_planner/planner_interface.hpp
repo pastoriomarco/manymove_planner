@@ -12,6 +12,7 @@
 #include <manymove_planner/action/move_manipulator_sequence.hpp>
 #include <rclcpp_action/rclcpp_action.hpp>
 #include <moveit/robot_trajectory/robot_trajectory.h>
+#include <control_msgs/action/follow_joint_trajectory.hpp>
 
 /**
  * @class PlannerInterface
@@ -100,6 +101,16 @@ public:
      * @return false if something failed
      */
     virtual bool sendControlledStopLinear(double deceleration_time = 0.25) = 0;
+
+    /**
+     * The following functions let action_server.cpp handle the feedback for the jointTrajectoryController collision check
+     * 
+     */
+    virtual rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr getFollowJointTrajClient() const = 0;
+    virtual moveit::core::RobotModelConstPtr getRobotModel() const = 0;
+    virtual std::string getPlanningGroup() const = 0;
+    virtual bool isStateValid(const moveit::core::RobotState *state,
+                              const moveit::core::JointModelGroup *group) const = 0;
 
 protected:
     /**

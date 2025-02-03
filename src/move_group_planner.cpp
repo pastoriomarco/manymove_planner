@@ -40,6 +40,22 @@ MoveGroupPlanner::MoveGroupPlanner(
     current_velocities_.clear();
 }
 
+// functions to let ExecuteTrajectory in action_server.cpp handle the collision check feedback
+rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr MoveGroupPlanner::getFollowJointTrajClient() const
+{
+    return follow_joint_traj_client_;
+}
+
+moveit::core::RobotModelConstPtr MoveGroupPlanner::getRobotModel() const
+{
+    return move_group_interface_->getRobotModel();
+}
+
+std::string MoveGroupPlanner::getPlanningGroup() const
+{
+    return planning_group_;
+}
+
 double MoveGroupPlanner::computePathLength(const moveit_msgs::msg::RobotTrajectory &trajectory) const
 {
     const auto &joint_trajectory = trajectory.joint_trajectory;
@@ -999,6 +1015,39 @@ bool MoveGroupPlanner::sendControlledStopLinear(double deceleration_time)
         RCLCPP_ERROR(logger_, "[MoveGroupPlanner] Stop goal ended with unknown result code %d.", (int)wrapped_result.code);
         return false;
     }
+}
+
+bool MoveGroupPlanner::isStateValid(const moveit::core::RobotState *state,
+                                    const moveit::core::JointModelGroup *group) const
+{
+    // Create a collision request and result container
+    collision_detection::CollisionRequest collision_request;
+    collision_detection::CollisionResult collision_result;
+
+    // Enable contact checking if needed
+    collision_request.contacts = true;
+    collision_request.max_contacts = 10;
+    collision_request.group_name = group->getName(); // Limit collision check to the given group
+
+    // Create a temporary PlanningScene from the robot model
+    planning_scene::PlanningScenePtr scene(new planning_scene::PlanningScene(state->getRobotModel()));
+
+    // Copy the given robot state into the planning scene
+    scene->getCurrentStateNonConst() = *state;
+    scene->getCurrentStateNonConst().update(); // Ensures state transforms are updated
+
+    // Perform collision checking
+    scene->checkCollision(collision_request, collision_result, scene->getCurrentState());
+
+    // Log a warning if a collision is detected
+    if (collision_result.collision)
+    {
+        RCLCPP_WARN(logger_, "[MoveGroupPlanner] Collision detected for group '%s'.",
+                    group->getName().c_str());
+    }
+
+    // Return true if no collision is detected
+    return !collision_result.collision;
 }
 
 void MoveGroupPlanner::jointStateCallback(const sensor_msgs::msg::JointState::SharedPtr msg)
