@@ -17,7 +17,7 @@ from uf_ros_lib.uf_robot_utils import generate_ros2_control_params_temp_file
 
 def launch_setup(context, *args, **kwargs):
     robot_ip = LaunchConfiguration('robot_ip', default='192.168.1.30')
-    report_type = LaunchConfiguration('report_type', default='dev')
+    report_type = LaunchConfiguration('report_type', default='rich')
     baud_checkset = LaunchConfiguration('baud_checkset', default=True)
     default_gripper_baud = LaunchConfiguration('default_gripper_baud', default=2000000)
     
