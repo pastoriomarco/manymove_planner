@@ -26,7 +26,7 @@ MoveGroupPlanner::MoveGroupPlanner(
 
     // Construct the monitor
     psm_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
-        node_, "robot_description");
+        node_, robot_description_param);
 
     if (!psm_->getPlanningScene())
     {
