@@ -242,13 +242,29 @@ def launch_setup(context, *args, **kwargs):
     # launch manymove_object_manager
     # ================================================================
 
-    # Static TF
+    # Object Manager node
     object_manager_node = Node(
         package='manymove_object_manager',
         executable='object_manager_node',
         name='object_manager_node',
         output='screen',
         parameters=[{'frame_id': 'world'}]
+    )
+
+    # ================================================================
+    # launch manymove_hmi
+    # ================================================================
+
+    # HMI node
+    manymove_hmi_node = Node(
+        package='manymove_hmi',
+        executable='manymove_hmi_executable',
+        name='manymove_hmi_node',
+        output='screen',
+        parameters=[{
+            'robot_model': xarm_type,
+            'robot_prefix': prefix
+        }]
     )
     
     return [
@@ -259,6 +275,7 @@ def launch_setup(context, *args, **kwargs):
         ros2_control_node,
         rviz_node,
         object_manager_node,
+        manymove_hmi_node,
     ] + controller_nodes
 
 

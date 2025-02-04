@@ -513,7 +513,15 @@ private:
                                 }
                             }
 
-                            size_t check_limit = std::min(closest_idx + 10, points.size() - 1);
+                            /**
+                             * Here we can choose if we want to check just the next N points or if we want to
+                             * check all points after the closest one. Checking all of the points to the end is
+                             * slower but safer, checking just the next N points is faster.
+                             */
+                            size_t check_limit = (points.size() - 1);
+                            // Uncomment the next two lines to check just the next N points
+                            // int num_points = 10;
+                            // check_limit = std::min(closest_idx + 10, points.size() - 1);
 
                             // Get the RobotModel from the planner
                             auto robot_model = planner_->getRobotModel();

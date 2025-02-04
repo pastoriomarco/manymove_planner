@@ -306,7 +306,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
     auto robot_start_state_ptr = planning_components_->getStartState();
     auto joint_model_group_ptr = robot_model_ptr->getJointModelGroup(planning_group_);
 
-    // Handle start state
+    // Handle start state: if there is a start joint position we use that one to plan, otherwise we use the current one.
     if (!goal_msg.goal.start_joint_values.empty())
     {
         moveit::core::RobotState start_state(*moveit_cpp_ptr_->getCurrentState());
@@ -354,7 +354,10 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
             {
                 moveit_msgs::msg::RobotTrajectory traj_msg;
                 solution.trajectory->getRobotTrajectoryMsg(traj_msg);
+
+                // We compute the traj length only if the traj is valid
                 double length = computePathLength(traj_msg);
+
                 trajectories.emplace_back(traj_msg, length);
                 RCLCPP_INFO_STREAM(logger_, "Calculated traj length: " << length);
             }
@@ -391,8 +394,8 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
             {
                 moveit_msgs::msg::RobotTrajectory traj_msg;
                 solution.trajectory->getRobotTrajectoryMsg(traj_msg);
-                double length = computePathLength(traj_msg);
 
+                // Check if traj is empty
                 if (traj_msg.joint_trajectory.points.empty())
                 {
                     RCLCPP_WARN(logger_, "%s target planning attempt %d failed: trajectory is empty.",
@@ -420,11 +423,13 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
 
                 if (targets_euclidean_distance < traj_tolerance)
                 {
+                    // Only compute path length if the traj is valid
+                    double length = computePathLength(traj_msg);
 
                     trajectories.emplace_back(traj_msg, length);
                     RCLCPP_INFO_STREAM(logger_, "Calculated pose traj length: " << length);
-                    RCLCPP_INFO(logger_, "moveit::core::MoveItErrorCode = %d.",
-                                solution.error_code.val);
+                    RCLCPP_DEBUG(logger_, "moveit::core::MoveItErrorCode = %d.",
+                                 solution.error_code.val);
                 }
                 else
                 {
@@ -492,19 +497,7 @@ std::pair<bool, moveit_msgs::msg::RobotTrajectory> MoveItCppPlanner::plan(const 
 
             std::vector<moveit::core::RobotStatePtr> trajectory_states;
 
-            // // Use the waypoint-based overload
-            // double fraction = moveit::core::CartesianInterpolator::computeCartesianPath(
-            //     start_state.get(),
-            //     joint_model_group_ptr,
-            //     trajectory_states,
-            //     ee_link,
-            //     eigen_waypoints,
-            //     true,
-            //     moveit::core::MaxEEFStep(goal_msg.goal.config.step_size),
-            //     moveit::core::JumpThreshold(goal_msg.goal.config.jump_threshold),
-            //     moveit::core::GroupStateValidityCallbackFn(),
-            //     kinematics::KinematicsQueryOptions(),
-            //     nullptr);
+            // Creating the callback to check for collisions on cartesian path
             moveit::core::GroupStateValidityCallbackFn custom_callback =
                 std::bind(&MoveItCppPlanner::isStateValid, this, std::placeholders::_1, std::placeholders::_2);
 
@@ -1183,8 +1176,8 @@ bool MoveItCppPlanner::isStateValid(const moveit::core::RobotState *state,
     collision_detection::CollisionResult collision_result;
 
     // Enable contact checks (if you need detailed contact info)
-    collision_request.contacts = true;
-    collision_request.max_contacts = 10;
+    // collision_request.contacts = true;
+    collision_request.max_contacts = 1;
 
     // **Key Line**: Limit collision checks to the JointModelGroup
     collision_request.group_name = group->getName();
