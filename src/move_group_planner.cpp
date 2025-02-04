@@ -18,6 +18,38 @@ MoveGroupPlanner::MoveGroupPlanner(
 
     RCLCPP_INFO(logger_, "MoveGroupPlanner initialized with group: %s", planning_group_.c_str());
 
+    // Create a PlanningSceneMonitor
+
+    // "robot_description" is typically the parameter name for the robot’s URDF
+    // If you have a different param or an SRDF param, adjust accordingly
+    const std::string robot_description_param = "robot_description";
+
+    // Construct the monitor
+    psm_ = std::make_shared<planning_scene_monitor::PlanningSceneMonitor>(
+        node_, "robot_description");
+
+    if (!psm_->getPlanningScene())
+    {
+        RCLCPP_ERROR(logger_, "PlanningSceneMonitor did not load a valid robot model");
+        // handle error if needed
+    }
+    else
+    {
+        // Optionally request the full scene once from the service
+        // psm_->requestPlanningSceneState("/get_planning_scene");
+
+        // Start listening to diffs / updates from move_group
+        psm_->startSceneMonitor("/monitored_planning_scene");
+
+        // Optional: start listening to the robot state topic
+        // psm_->startStateMonitor();
+
+        // If you want world geometry updates (collision objects) via /collision_object, etc.
+        psm_->startWorldGeometryMonitor();
+
+        RCLCPP_INFO(logger_, "PlanningSceneMonitor started: listening to /monitored_planning_scene");
+    }
+
     // Initialize FollowJointTrajectory action client
     follow_joint_traj_client_ = rclcpp_action::create_client<control_msgs::action::FollowJointTrajectory>(node_, "/" + traj_controller_ + "/follow_joint_trajectory");
     if (!follow_joint_traj_client_->wait_for_action_server(std::chrono::seconds(10)))
@@ -1020,33 +1052,43 @@ bool MoveGroupPlanner::sendControlledStopLinear(double deceleration_time)
 bool MoveGroupPlanner::isStateValid(const moveit::core::RobotState *state,
                                     const moveit::core::JointModelGroup *group) const
 {
-    // Create a collision request and result container
+    if (!psm_)
+    {
+        RCLCPP_ERROR(logger_, "PlanningSceneMonitor is null in isStateValid()");
+        return true; // fallback: allow
+    }
+
+    // Lock the scene for read-only
+    planning_scene_monitor::LockedPlanningSceneRO locked_scene(psm_);
+    if (!locked_scene)
+    {
+        RCLCPP_ERROR(logger_, "Failed to lock the PlanningScene. isStateValid returns true.");
+        return true; // fallback
+    }
+
+    // Create a copy of the state for collision checking
+    // Or we can just pass *state directly, see below
+    moveit::core::RobotState temp_state(*state);
+    temp_state.update(); // Make sure transforms are up to date
+
+    // Prepare the collision request
     collision_detection::CollisionRequest collision_request;
     collision_detection::CollisionResult collision_result;
-
-    // Enable contact checking if needed
     collision_request.contacts = true;
     collision_request.max_contacts = 10;
-    collision_request.group_name = group->getName(); // Limit collision check to the given group
+    collision_request.group_name = group->getName();
 
-    // Create a temporary PlanningScene from the robot model
-    planning_scene::PlanningScenePtr scene(new planning_scene::PlanningScene(state->getRobotModel()));
+    // Check collision
+    locked_scene->checkCollision(collision_request, collision_result, temp_state);
 
-    // Copy the given robot state into the planning scene
-    scene->getCurrentStateNonConst() = *state;
-    scene->getCurrentStateNonConst().update(); // Ensures state transforms are updated
-
-    // Perform collision checking
-    scene->checkCollision(collision_request, collision_result, scene->getCurrentState());
-
-    // Log a warning if a collision is detected
     if (collision_result.collision)
     {
-        RCLCPP_WARN(logger_, "[MoveGroupPlanner] Collision detected for group '%s'.",
+        RCLCPP_WARN(logger_,
+                    "[MoveGroupPlanner] Collision detected in custom isStateValid() (group='%s').",
                     group->getName().c_str());
     }
 
-    // Return true if no collision is detected
+    // Return true if no collision
     return !collision_result.collision;
 }
 

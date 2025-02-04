@@ -239,7 +239,7 @@ private:
     std::string traj_controller_;  ///< Name of the trajectory controller to be used.
 
     std::shared_ptr<moveit::planning_interface::MoveGroupInterface> move_group_interface_; ///< Shared pointer to MoveGroupInterface.
-    moveit::planning_interface::PlanningSceneInterface planning_scene_interface_;          ///< Interface to the planning scene.
+    planning_scene_monitor::PlanningSceneMonitorPtr psm_;                                  ///< Planning scene monitor
 
     rclcpp_action::Client<control_msgs::action::FollowJointTrajectory>::SharedPtr follow_joint_traj_client_; ///< Action client for FollowJointTrajectory.
     rclcpp::Subscription<sensor_msgs::msg::JointState>::SharedPtr joint_state_sub_;                          ///< /joint_states subscriber.
