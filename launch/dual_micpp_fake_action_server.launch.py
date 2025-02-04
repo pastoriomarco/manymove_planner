@@ -408,7 +408,7 @@ def launch_setup(context, *args, **kwargs):
     # launch manymove_object_manager
     # ================================================================
 
-    # Static TF
+    # Object Manager node
     object_manager_node = Node(
         package='manymove_object_manager',
         executable='object_manager_node',
